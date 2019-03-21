@@ -1,5 +1,5 @@
 // 
-// Copyright (c) 2004-2018 Jaroslaw Kowalski <jaak@jkowalski.net>, Kim Christensen, Julian Verdurmen
+// Copyright (c) 2004-2019 Jaroslaw Kowalski <jaak@jkowalski.net>, Kim Christensen, Julian Verdurmen
 // 
 // All rights reserved.
 // 
@@ -118,7 +118,7 @@ namespace NLog.Internal.FileAppenders
             {
                 // ignore the exception, another process was killed without properly releasing the mutex
                 // the mutex has been acquired, so proceed to writing
-                // See: http://msdn.microsoft.com/en-us/library/system.threading.abandonedmutexexception.aspx
+                // See: https://msdn.microsoft.com/en-us/library/system.threading.abandonedmutexexception.aspx
             }
 
             try

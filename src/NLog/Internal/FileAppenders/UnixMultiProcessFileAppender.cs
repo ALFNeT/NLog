@@ -1,5 +1,5 @@
 // 
-// Copyright (c) 2004-2018 Jaroslaw Kowalski <jaak@jkowalski.net>, Kim Christensen, Julian Verdurmen
+// Copyright (c) 2004-2019 Jaroslaw Kowalski <jaak@jkowalski.net>, Kim Christensen, Julian Verdurmen
 // 
 // All rights reserved.
 // 
@@ -39,6 +39,7 @@ namespace NLog.Internal.FileAppenders
     using System.Collections;
     using System.Collections.Specialized;
     using System.IO;
+    using System.Security;
     using System.Text;
     using System.Threading;
     using System.Xml;
@@ -60,6 +61,7 @@ namespace NLog.Internal.FileAppenders
     /// processes are trying to write to the same file, because setting the file
     /// pointer to the end of the file and appending can be made one operation.
     /// </remarks>
+    [SecuritySafeCritical]
     internal class UnixMultiProcessFileAppender : BaseMutexFileAppender
     {
         private UnixStream _file;

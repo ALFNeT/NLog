@@ -1,5 +1,5 @@
 // 
-// Copyright (c) 2004-2018 Jaroslaw Kowalski <jaak@jkowalski.net>, Kim Christensen, Julian Verdurmen
+// Copyright (c) 2004-2019 Jaroslaw Kowalski <jaak@jkowalski.net>, Kim Christensen, Julian Verdurmen
 // 
 // All rights reserved.
 // 
@@ -156,7 +156,7 @@ namespace NLog.Targets
             _maxArchiveFiles = 0;
             ConcurrentWriteAttemptDelay = 1;
             ArchiveEvery = FileArchivePeriod.None;
-            ArchiveAboveSize = FileTarget.ArchiveAboveSizeDisabled;
+            ArchiveAboveSize = ArchiveAboveSizeDisabled;
             ConcurrentWriteAttempts = 10;
             ConcurrentWrites = true;
 #if SILVERLIGHT || NETSTANDARD1_0
@@ -449,7 +449,8 @@ namespace NLog.Targets
             get
             {
 #if SupportsMutex
-                return _concurrentWrites ?? true;
+
+                return _concurrentWrites ?? PlatformDetector.SupportsSharableMutex;
 #else
                 return _concurrentWrites ?? false;  // Better user experience for mobile platforms
 #endif
@@ -746,10 +747,10 @@ namespace NLog.Targets
         {
             if (_fileAppenderCache != null)
             {
-                _fileAppenderCache.CheckCloseAppenders -= AutoClosingTimerCallback;
+                _fileAppenderCache.CheckCloseAppenders -= AutoCloseAppendersAfterArchive;
 
                 if (KeepFileOpen)
-                    _fileAppenderCache.CheckCloseAppenders += AutoClosingTimerCallback;
+                    _fileAppenderCache.CheckCloseAppenders += AutoCloseAppendersAfterArchive;
 
 #if !SILVERLIGHT && !__IOS__ && !__ANDROID__ && !NETSTANDARD1_3
                 bool mustWatchArchiving = IsArchivingEnabled && ConcurrentWrites && KeepFileOpen;
@@ -884,7 +885,7 @@ namespace NLog.Targets
                         return UnixMultiProcessFileAppender.TheFactory;
                     }
 #elif !NETSTANDARD
-                    if (PlatformDetector.IsDesktopWin32 && !PlatformDetector.IsMono)
+                    if (PlatformDetector.IsWin32 && !PlatformDetector.IsMono)
                     {
                         return WindowsMultiProcessFileAppender.TheFactory;
                     }
@@ -927,13 +928,13 @@ namespace NLog.Targets
 
             if ((OpenFileCacheSize > 0 || EnableFileDelete) && (OpenFileCacheTimeout > 0 || OpenFileFlushTimeout > 0))
             {
-                int openFileAutoTimeout = Math.Min(Math.Max(OpenFileCacheTimeout,1), Math.Max(OpenFileFlushTimeout,1)) * 1000;
+                int openFileAutoTimeoutSecs = (OpenFileCacheTimeout > 0 && OpenFileFlushTimeout > 0) ? Math.Min(OpenFileCacheTimeout, OpenFileFlushTimeout) : Math.Max(OpenFileCacheTimeout, OpenFileFlushTimeout);
                 InternalLogger.Trace("FileTarget(Name={0}): Start autoClosingTimer", Name);
                 _autoClosingTimer = new Timer(
                     (state) => AutoClosingTimerCallback(this, EventArgs.Empty),
                     null,
-                    openFileAutoTimeout,
-                    openFileAutoTimeout);
+                    openFileAutoTimeoutSecs * 1000,
+                    openFileAutoTimeoutSecs * 1000);
             }
         }
 
@@ -994,6 +995,11 @@ namespace NLog.Targets
         protected override void Write(LogEventInfo logEvent)
         {
             var logFileName = GetFullFileName(logEvent);
+            if (string.IsNullOrEmpty(logFileName))
+            {
+                throw new ArgumentException("The path is not of a legal form.");
+            }
+
             if (OptimizeBufferReuse)
             {
                 using (var targetStream = _reusableFileWriteStream.Allocate())
@@ -1079,54 +1085,67 @@ namespace NLog.Targets
 
                 foreach (var bucket in buckets)
                 {
+                    int bucketCount = bucket.Value.Count;
+                    if (bucketCount <= 0)
+                        continue;
+
                     string fileName = bucket.Key;
+                    if (string.IsNullOrEmpty(fileName))
+                    {
+                        var emptyPathException = new ArgumentException("The path is not of a legal form.");
+                        for (int i = 0; i < bucketCount; ++i)
+                        {
+                            bucket.Value[i].Continuation(emptyPathException);
+                        }
+                        continue;
+                    }
 
                     ms.SetLength(0);
                     ms.Position = 0;
 
-                    LogEventInfo firstLogEvent = null;
-
-                    int bucketCount = bucket.Value.Count;
-
-                    using (var targetBuilder = OptimizeBufferReuse ? ReusableLayoutBuilder.Allocate() : ReusableLayoutBuilder.None)
-                    using (var targetBuffer = OptimizeBufferReuse ? _reusableEncodingBuffer.Allocate() : _reusableEncodingBuffer.None)
-                    using (var targetStream = OptimizeBufferReuse ? _reusableFileWriteStream.Allocate() : _reusableFileWriteStream.None)
-                    {
-                        for (int i = 0; i < bucketCount; i++)
-                        {
-                            AsyncLogEventInfo ev = bucket.Value[i];
-                            if (firstLogEvent == null)
-                            {
-                                firstLogEvent = ev.LogEvent;
-                            }
-
-                            if (targetBuilder.Result != null && targetStream.Result != null)
-                            {
-                                // For some CPU's then it is faster to write to a small MemoryStream, and then copy to the larger one
-                                targetStream.Result.Position = 0;
-                                targetStream.Result.SetLength(0);
-                                targetBuilder.Result.ClearBuilder();
-                                RenderFormattedMessageToStream(ev.LogEvent, targetBuilder.Result, targetBuffer.Result, targetStream.Result);
-                                ms.Write(targetStream.Result.GetBuffer(), 0, (int)targetStream.Result.Length);
-                            }
-                            else
-                            {
-                                byte[] bytes = GetBytesToWrite(ev.LogEvent);
-                                if (ms.Capacity == 0)
-                                {
-                                    ms.Capacity = GetMemoryStreamInitialSize(bucket.Value.Count, bytes.Length);
-                                }
-                                ms.Write(bytes, 0, bytes.Length);
-                            }
-                        }
-                    }
+                    WriteToMemoryStream(bucket.Value, ms);
 
                     Exception lastException;
-                    FlushCurrentFileWrites(fileName, firstLogEvent, ms, out lastException);
+                    FlushCurrentFileWrites(fileName, bucket.Value[0].LogEvent, ms, out lastException);
 
                     for (int i = 0; i < bucketCount; ++i)
                     {
                         bucket.Value[i].Continuation(lastException);
+                    }
+                }
+            }
+        }
+
+        private void WriteToMemoryStream(IList<AsyncLogEventInfo> logEvents, MemoryStream ms)
+        {
+            int bucketCount = logEvents.Count;
+
+            using (var targetBuilder = OptimizeBufferReuse ? ReusableLayoutBuilder.Allocate() : ReusableLayoutBuilder.None)
+            using (var targetBuffer = OptimizeBufferReuse ? _reusableEncodingBuffer.Allocate() : _reusableEncodingBuffer.None)
+            using (var targetStream = OptimizeBufferReuse ? _reusableFileWriteStream.Allocate() : _reusableFileWriteStream.None)
+            {
+                bool bufferReusePossible = targetBuilder.Result != null && targetStream.Result != null;
+
+                for (int i = 0; i < bucketCount; i++)
+                {
+                    AsyncLogEventInfo ev = logEvents[i];
+                    if (bufferReusePossible)
+                    {
+                        // For some CPU's then it is faster to write to a small MemoryStream, and then copy to the larger one
+                        targetStream.Result.Position = 0;
+                        targetStream.Result.SetLength(0);
+                        targetBuilder.Result.ClearBuilder();
+                        RenderFormattedMessageToStream(ev.LogEvent, targetBuilder.Result, targetBuffer.Result, targetStream.Result);
+                        ms.Write(targetStream.Result.GetBuffer(), 0, (int)targetStream.Result.Length);
+                    }
+                    else
+                    {
+                        byte[] bytes = GetBytesToWrite(ev.LogEvent);
+                        if (ms.Capacity == 0)
+                        {
+                            ms.Capacity = GetMemoryStreamInitialSize(bucketCount, bytes.Length);
+                        }
+                        ms.Write(bytes, 0, bytes.Length);
                     }
                 }
             }
@@ -1289,81 +1308,89 @@ namespace NLog.Targets
                 InternalLogger.Info("FileTarget(Name={0}): Archiving {1} to {2}", Name, fileName, archiveFileName);
                 if (File.Exists(archiveFileName))
                 {
-                    //todo handle double footer
-                    InternalLogger.Info("FileTarget(Name={0}): Already exists, append to {1}", Name, archiveFileName);
-
-                    //todo maybe needs a better filelock behaviour
-
-                    //copy to archive file.
-                    var fileShare = FileShare.ReadWrite;
-                    if (EnableFileDelete)
-                    {
-                        fileShare |= FileShare.Delete;
-                    }
-
-                    using (FileStream fileStream = File.Open(fileName, FileMode.Open, FileAccess.ReadWrite, fileShare))
-                    using (FileStream archiveFileStream = File.Open(archiveFileName, FileMode.Append))
-                    {
-                        fileStream.CopyAndSkipBom(archiveFileStream, Encoding);
-                        //clear old content
-                        fileStream.SetLength(0);
-
-                        if (EnableFileDelete)
-                        {
-                            // Attempt to delete file to reset File-Creation-Time (Delete under file-lock)
-                            if (!DeleteOldArchiveFile(fileName))
-                            {
-                                fileShare &= ~FileShare.Delete;  // Retry after having released file-lock
-                            }
-                        }
-
-                        fileStream.Close(); // This flushes the content, too.
-#if NET3_5
-                        archiveFileStream.Flush();
-#else
-                        archiveFileStream.Flush(true);
-#endif
-                    }
-
-                    if ((fileShare & FileShare.Delete) == FileShare.None)
-                    {
-                        DeleteOldArchiveFile(fileName); // Attempt to delete file to reset File-Creation-Time
-                    }
+                    ArchiveFileAppendExisting(fileName, archiveFileName);
                 }
                 else
                 {
-                    try
+                    ArchiveFileMove(fileName, archiveFileName);
+                }
+            }
+        }
+
+        private void ArchiveFileAppendExisting(string fileName, string archiveFileName)
+        {
+            //todo handle double footer
+            InternalLogger.Info("FileTarget(Name={0}): Already exists, append to {1}", Name, archiveFileName);
+
+             //copy to archive file.
+            var fileShare = FileShare.ReadWrite;
+            if (EnableFileDelete)
+            {
+                fileShare |= FileShare.Delete;
+            }
+
+            using (FileStream fileStream = File.Open(fileName, FileMode.Open, FileAccess.ReadWrite, fileShare))
+            using (FileStream archiveFileStream = File.Open(archiveFileName, FileMode.Append))
+            {
+                fileStream.CopyAndSkipBom(archiveFileStream, Encoding);
+                //clear old content
+                fileStream.SetLength(0);
+
+                if (EnableFileDelete)
+                {
+                    // Attempt to delete file to reset File-Creation-Time (Delete under file-lock)
+                    if (!DeleteOldArchiveFile(fileName))
                     {
-                        InternalLogger.Debug("FileTarget(Name={0}): Move file from '{1}' to '{2}'", Name, fileName, archiveFileName);
-                        File.Move(fileName, archiveFileName);
-                    }
-                    catch (IOException ex)
-                    {
-                        if (KeepFileOpen && !ConcurrentWrites)
-                            throw;  // No need to retry, when only single process access
-
-                        if (!EnableFileDelete && KeepFileOpen)
-                            throw;  // No need to retry when file delete has been disabled
-
-                        if (!PlatformDetector.SupportsSharableMutex)
-                            throw;  // No need to retry when not having a real archive mutex to protect us
-
-                        // It is possible to move a file while other processes has open file-handles.
-                        // Unless the other process is actively writing, then the file move might fail.
-                        // We are already holding the archive-mutex, so lets retry if things are stable
-                        InternalLogger.Warn(ex, "FileTarget(Name={0}): Archiving failed. Checking for retry move of {1} to {2}.", Name, fileName, archiveFileName);
-                        if (!File.Exists(fileName) || File.Exists(archiveFileName))
-                            throw;
-
-                        AsyncHelpers.WaitForDelay(TimeSpan.FromMilliseconds(50));
-
-                        if (!File.Exists(fileName) || File.Exists(archiveFileName))
-                            throw;
-
-                        InternalLogger.Debug("FileTarget(Name={0}): Archiving retrying move of {1} to {2}.", Name, fileName, archiveFileName);
-                        File.Move(fileName, archiveFileName);
+                        fileShare &= ~FileShare.Delete;  // Retry after having released file-lock
                     }
                 }
+
+                fileStream.Close(); // This flushes the content, too.
+#if NET3_5
+                archiveFileStream.Flush();
+#else
+                archiveFileStream.Flush(true);
+#endif
+            }
+
+            if ((fileShare & FileShare.Delete) == FileShare.None)
+            {
+                DeleteOldArchiveFile(fileName); // Attempt to delete file to reset File-Creation-Time
+            }
+        }
+
+        private void ArchiveFileMove(string fileName, string archiveFileName)
+        {
+            try
+            {
+                InternalLogger.Debug("FileTarget(Name={0}): Move file from '{1}' to '{2}'", Name, fileName, archiveFileName);
+                File.Move(fileName, archiveFileName);
+            }
+            catch (IOException ex)
+            {
+                if (KeepFileOpen && !ConcurrentWrites)
+                    throw;  // No need to retry, when only single process access
+
+                if (!EnableFileDelete && KeepFileOpen)
+                    throw;  // No need to retry when file delete has been disabled
+
+                if (!PlatformDetector.SupportsSharableMutex)
+                    throw;  // No need to retry when not having a real archive mutex to protect us
+
+                // It is possible to move a file while other processes has open file-handles.
+                // Unless the other process is actively writing, then the file move might fail.
+                // We are already holding the archive-mutex, so lets retry if things are stable
+                InternalLogger.Warn(ex, "FileTarget(Name={0}): Archiving failed. Checking for retry move of {1} to {2}.", Name, fileName, archiveFileName);
+                if (!File.Exists(fileName) || File.Exists(archiveFileName))
+                    throw;
+
+                AsyncHelpers.WaitForDelay(TimeSpan.FromMilliseconds(50));
+
+                if (!File.Exists(fileName) || File.Exists(archiveFileName))
+                    throw;
+
+                InternalLogger.Debug("FileTarget(Name={0}): Archiving retrying move of {1} to {2}.", Name, fileName, archiveFileName);
+                File.Move(fileName, archiveFileName);
             }
         }
 
@@ -1443,9 +1470,9 @@ namespace NLog.Targets
                 {
                     case FileArchivePeriod.Year: formatString = "yyyy"; break;
                     case FileArchivePeriod.Month: formatString = "yyyyMM"; break;
-                    default: formatString = "yyyyMMdd"; break;      // Also for Weekdays
                     case FileArchivePeriod.Hour: formatString = "yyyyMMddHH"; break;
                     case FileArchivePeriod.Minute: formatString = "yyyyMMddHHmm"; break;
+                    default: formatString = "yyyyMMdd"; break;      // Also for Weekdays
                 }
             }
             return formatString;
@@ -1536,7 +1563,7 @@ namespace NLog.Targets
         ///  Sunday 2017-03-05. If dayOfWeek is Thursday, this will return *next* Thursday 2017-03-09.</remarks>
         public static DateTime CalculateNextWeekday(DateTime previousLogEventTimestamp, DayOfWeek dayOfWeek)
         {
-            // Shamelessly taken from http://stackoverflow.com/a/7611480/1354930
+            // Shamelessly taken from https://stackoverflow.com/a/7611480/1354930
             int start = (int)previousLogEventTimestamp.DayOfWeek;
             int target = (int)dayOfWeek;
             if (target <= start)
@@ -1563,12 +1590,23 @@ namespace NLog.Targets
             }
 
             string archiveFilePattern = GetArchiveFileNamePattern(fileName, eventInfo);
-
             if (string.IsNullOrEmpty(archiveFilePattern))
             {
                 InternalLogger.Warn("FileTarget(Name={0}): Skip auto archive because archiveFilePattern is NULL", Name);
                 return;
             }
+
+            DateTime? archiveDate = GetArchiveDate(fileName, eventInfo, previousLogEventTimestamp);
+
+            var archiveFileName = GenerateArchiveFileNameAfterCleanup(fileName, fileInfo, archiveFilePattern, archiveDate, initializedNewFile);
+            if (!string.IsNullOrEmpty(archiveFileName))
+            {
+                ArchiveFile(fileInfo.FullName, archiveFileName);
+            }
+        }
+
+        private string GenerateArchiveFileNameAfterCleanup(string fileName, FileInfo fileInfo, string archiveFilePattern, DateTime? archiveDate, bool initializedNewFile)
+        {
             InternalLogger.Trace("FileTarget(Name={0}): Archive pattern '{1}'", Name, archiveFilePattern);
 
             var fileArchiveStyle = GetFileArchiveHelper(archiveFilePattern);
@@ -1594,43 +1632,42 @@ namespace NLog.Targets
                     if (string.Equals(Path.GetDirectoryName(archiveFilePattern), fileInfo.DirectoryName, StringComparison.OrdinalIgnoreCase))
                     {
                         DeleteOldArchiveFile(fileName);
-                        return;
+                        return null;
                     }
                 }
             }
 
-            DateTime? archiveDate = GetArchiveDate(fileName, eventInfo, previousLogEventTimestamp);
             var archiveFileName = archiveDate.HasValue ? fileArchiveStyle.GenerateArchiveFileName(archiveFilePattern, archiveDate.Value, existingArchiveFiles) : null;
-            if (archiveFileName != null)
-            {
-                if (!initializedNewFile)
-                {
-                    FinalizeFile(fileName, isArchiving: true);
-                }
+            if (archiveFileName == null)
+                return null;
 
-                if (string.Equals(Path.GetDirectoryName(archiveFileName.FileName), fileInfo.DirectoryName, StringComparison.OrdinalIgnoreCase))
+            if (!initializedNewFile)
+            {
+                FinalizeFile(fileName, isArchiving: true);
+            }
+
+            if (string.Equals(Path.GetDirectoryName(archiveFileName.FileName), fileInfo.DirectoryName, StringComparison.OrdinalIgnoreCase))
+            {
+                // Extra handling when archive-directory is the same as logging-directory
+                for (int i = 0; i < existingArchiveFiles.Count; ++i)
                 {
-                    // Extra handling when archive-directory is the same as logging-directory
-                    for (int i = 0; i < existingArchiveFiles.Count; ++i)
+                    if (string.Equals(existingArchiveFiles[i].FileName, fileInfo.FullName, StringComparison.OrdinalIgnoreCase))
                     {
-                        if (string.Equals(existingArchiveFiles[i].FileName, fileInfo.FullName, StringComparison.OrdinalIgnoreCase))
-                        {
-                            existingArchiveFiles.RemoveAt(i);
-                            break;
-                        }
+                        existingArchiveFiles.RemoveAt(i);
+                        break;
                     }
                 }
-
-                existingArchiveFiles.Add(archiveFileName);
-
-                var cleanupArchiveFiles = fileArchiveStyle.CheckArchiveCleanup(archiveFilePattern, existingArchiveFiles, MaxArchiveFiles);
-                foreach (var oldArchiveFile in cleanupArchiveFiles)
-                {
-                    DeleteOldArchiveFile(oldArchiveFile.FileName);
-                }
-
-                ArchiveFile(fileInfo.FullName, archiveFileName.FileName);
             }
+
+            existingArchiveFiles.Add(archiveFileName);
+
+            var cleanupArchiveFiles = fileArchiveStyle.CheckArchiveCleanup(archiveFilePattern, existingArchiveFiles, MaxArchiveFiles);
+            foreach (var oldArchiveFile in cleanupArchiveFiles)
+            {
+                DeleteOldArchiveFile(oldArchiveFile.FileName);
+            }
+
+            return archiveFileName.FileName;
         }
 
         /// <summary>
@@ -1723,16 +1760,21 @@ namespace NLog.Targets
 #if SupportsMutex
                     try
                     {
-                        if (archivedAppender is BaseMutexFileAppender mutexFileAppender)
-                            mutexFileAppender.ArchiveMutex?.WaitOne();
-                        else if (!KeepFileOpen || ConcurrentWrites)
+                        if (archivedAppender is BaseMutexFileAppender mutexFileAppender && mutexFileAppender.ArchiveMutex != null)
+                        {
+                            mutexFileAppender.ArchiveMutex.WaitOne();
+                        }
+                        else
+                        {
                             InternalLogger.Info("FileTarget(Name={0}): Archive mutex not available: {1}", Name, archiveFile);
+                        }
+
                     }
                     catch (AbandonedMutexException)
                     {
                         // ignore the exception, another process was killed without properly releasing the mutex
                         // the mutex has been acquired, so proceed to writing
-                        // See: http://msdn.microsoft.com/en-us/library/system.threading.abandonedmutexexception.aspx
+                        // See: https://msdn.microsoft.com/en-us/library/system.threading.abandonedmutexexception.aspx
                     }
 #endif
 
@@ -1968,36 +2010,60 @@ namespace NLog.Targets
             }
         }
 
-        private void AutoClosingTimerCallback(object sender, EventArgs state)
+        private void AutoCloseAppendersAfterArchive(object sender, EventArgs state)
         {
+            bool lockTaken = Monitor.TryEnter(SyncRoot, TimeSpan.FromSeconds(2));
+            if (!lockTaken)
+                return; // Archive events triggered by FileWatcher are important, but not life critical
+
             try
             {
-                lock (SyncRoot)
+                if (!IsInitialized)
                 {
-                    if (!IsInitialized)
-                    {
-                        return;
-                    }
+                    return;
+                }
 
-                    if (!ReferenceEquals(sender, this))
-                    {
-                        InternalLogger.Trace("FileTarget(Name={0}): Auto Close FileAppenders after archive", Name);
-                        _fileAppenderCache.CloseAppenders(DateTime.MinValue);
-                    }
-                    else
-                    {
-                        if (OpenFileCacheTimeout > 0)
-                        {
-                            DateTime expireTime = DateTime.UtcNow.AddSeconds(-OpenFileCacheTimeout);
-                            InternalLogger.Trace("FileTarget(Name={0}): Auto Close FileAppenders", Name);
-                            _fileAppenderCache.CloseAppenders(expireTime);
-                        }
+                InternalLogger.Trace("FileTarget(Name={0}): Auto Close FileAppenders after archive", Name);
+                _fileAppenderCache.CloseAppenders(DateTime.MinValue);
+            }
+            catch (Exception exception)
+            {
+                InternalLogger.Warn(exception, "FileTarget(Name={0}): Exception in AutoCloseAppendersAfterArchive", Name);
 
-                        if (OpenFileFlushTimeout > 0 && !AutoFlush)
-                        {
-                            ConditionalFlushOpenFileAppenders();
-                        }
-                    }
+                if (exception.MustBeRethrownImmediately())
+                {
+                    throw;  // Throwing exceptions here will crash the entire application (.NET 2.0 behavior)
+                }
+            }
+            finally
+            {
+                Monitor.Exit(SyncRoot);
+            }
+        }
+
+        private void AutoClosingTimerCallback(object sender, EventArgs state)
+        {
+            bool lockTaken = Monitor.TryEnter(SyncRoot, TimeSpan.FromSeconds(0.5));
+            if (!lockTaken)
+                return; // Timer will trigger again, no need for timers to queue up
+
+            try
+            {
+                if (!IsInitialized)
+                {
+                    return;
+                }
+
+                if (OpenFileCacheTimeout > 0)
+                {
+                    DateTime expireTime = DateTime.UtcNow.AddSeconds(-OpenFileCacheTimeout);
+                    InternalLogger.Trace("FileTarget(Name={0}): Auto Close FileAppenders", Name);
+                    _fileAppenderCache.CloseAppenders(expireTime);
+                }
+
+                if (OpenFileFlushTimeout > 0 && !AutoFlush)
+                {
+                    ConditionalFlushOpenFileAppenders();
                 }
             }
             catch (Exception exception)
@@ -2008,6 +2074,10 @@ namespace NLog.Targets
                 {
                     throw;  // Throwing exceptions here will crash the entire application (.NET 2.0 behavior)
                 }
+            }
+            finally
+            {
+                Monitor.Exit(SyncRoot);
             }
         }
 
@@ -2144,9 +2214,9 @@ namespace NLog.Targets
         }
 
         /// <summary>
-        /// Invokes the archiving and clean up of older archive file based on the values of <see
-        /// cref="NLog.Targets.FileTarget.ArchiveOldFileOnStartup"/> and <see
-        /// cref="NLog.Targets.FileTarget.DeleteOldFileOnStartup"/> properties respectively.
+        /// Invokes the archiving and clean up of older archive file based on the values of
+        /// <see cref="NLog.Targets.FileTarget.ArchiveOldFileOnStartup"/> and
+        /// <see cref="NLog.Targets.FileTarget.DeleteOldFileOnStartup"/> properties respectively.
         /// </summary>
         /// <param name="fileName">File name to be written.</param>
         /// <param name="logEvent">Log event that the <see cref="FileTarget"/> instance is currently processing.</param>
@@ -2246,7 +2316,6 @@ namespace NLog.Targets
             //performance: cheap check before checking file info 
             if (Header == null && !WriteBom) return;
 
-            //todo replace with hasWritten?
             var length = appender.GetFileLength();
             //  Write header and BOM only on empty files or if file info cannot be obtained.
             if (length == null || length == 0)

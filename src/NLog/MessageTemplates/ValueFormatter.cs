@@ -1,5 +1,5 @@
-﻿// 
-// Copyright (c) 2004-2018 Jaroslaw Kowalski <jaak@jkowalski.net>, Kim Christensen, Julian Verdurmen
+// 
+// Copyright (c) 2004-2019 Jaroslaw Kowalski <jaak@jkowalski.net>, Kim Christensen, Julian Verdurmen
 // 
 // All rights reserved.
 // 
@@ -33,6 +33,7 @@
 
 using System;
 using System.Collections;
+using System.Collections.Generic;
 using System.Text;
 using NLog.Config;
 using NLog.Internal;
@@ -50,17 +51,21 @@ namespace NLog.MessageTemplates
             set => _instance = value ?? new ValueFormatter();
         }
         private static IValueFormatter _instance;
+        private static readonly IEqualityComparer<object> _referenceEqualsComparer = SingleItemOptimizedHashSet<object>.ReferenceEqualityComparer.Default;
 
         /// <summary>Singleton</summary>
         private ValueFormatter()
         {
         }
 
-        private const int MaxRecursionDepth = 10;
+        private const int MaxRecursionDepth = 2;
         private const int MaxValueLength = 512 * 1024;
         private const string LiteralFormatSymbol = "l";
 
         private readonly MruCache<Enum, string> _enumCache = new MruCache<Enum, string>(1500);
+
+        public const string FormatAsJson = "@";
+        public const string FormatAsString = "$";
 
         /// <summary>
         /// Serialization of an object, e.g. JSON and append to <paramref name="builder"/>
@@ -128,11 +133,6 @@ namespace NLog.MessageTemplates
         /// <returns></returns>
         private bool SerializeSimpleObject(object value, string format, IFormatProvider formatProvider, StringBuilder builder)
         {
-            // todo support all scalar types: 
-
-            // todo byte[] - hex?
-            // todo nullables correct?
-
             if (value is string stringValue)
             {
                 bool includeQuotes = format != LiteralFormatSymbol;
@@ -230,13 +230,13 @@ namespace NLog.MessageTemplates
             IDictionary dictionary = collection as IDictionary;
             if (dictionary != null)
             {
-                using (new SingleItemOptimizedHashSet<object>.SingleItemScopedInsert(dictionary, ref objectsInPath, true))
+                using (new SingleItemOptimizedHashSet<object>.SingleItemScopedInsert(dictionary, ref objectsInPath, true, _referenceEqualsComparer))
                 {
                     return SerializeDictionaryObject(dictionary, format, formatProvider, builder, objectsInPath, depth);
                 }
             }
 
-            using (new SingleItemOptimizedHashSet<object>.SingleItemScopedInsert(collection, ref objectsInPath, true))
+            using (new SingleItemOptimizedHashSet<object>.SingleItemScopedInsert(collection, ref objectsInPath, true, _referenceEqualsComparer))
             {
                 return SerializeCollectionObject(collection, format, formatProvider, builder, objectsInPath, depth);
             }
@@ -258,7 +258,7 @@ namespace NLog.MessageTemplates
         private bool SerializeDictionaryObject(IDictionary dictionary, string format, IFormatProvider formatProvider, StringBuilder builder, SingleItemOptimizedHashSet<object> objectsInPath, int depth)
         {
             bool separator = false;
-            foreach (DictionaryEntry item in dictionary)
+            foreach (var item in new DictionaryEntryEnumerable(dictionary))
             {
                 if (builder.Length > MaxValueLength)
                     return false;

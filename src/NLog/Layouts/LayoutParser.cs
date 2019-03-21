@@ -1,5 +1,5 @@
 // 
-// Copyright (c) 2004-2018 Jaroslaw Kowalski <jaak@jkowalski.net>, Kim Christensen, Julian Verdurmen
+// Copyright (c) 2004-2019 Jaroslaw Kowalski <jaak@jkowalski.net>, Kim Christensen, Julian Verdurmen
 // 
 // All rights reserved.
 // 
@@ -230,7 +230,7 @@ namespace NLog.Layouts
                 // which can not be used directly as they are used as tokens by the parser
                 // All escape codes listed in the following link were included
                 // in addition to "\{", "\}", "\:" which are NLog specific:
-                // http://blogs.msdn.com/b/csharpfaq/archive/2004/03/12/what-character-escape-sequences-are-available.aspx
+                // https://blogs.msdn.com/b/csharpfaq/archive/2004/03/12/what-character-escape-sequences-are-available.aspx
                 if (ch == '\\')
                 {
                     // skip the backslash

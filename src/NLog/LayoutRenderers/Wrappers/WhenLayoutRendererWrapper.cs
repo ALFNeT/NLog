@@ -1,5 +1,5 @@
 // 
-// Copyright (c) 2004-2018 Jaroslaw Kowalski <jaak@jkowalski.net>, Kim Christensen, Julian Verdurmen
+// Copyright (c) 2004-2019 Jaroslaw Kowalski <jaak@jkowalski.net>, Kim Christensen, Julian Verdurmen
 // 
 // All rights reserved.
 // 
@@ -62,15 +62,24 @@ namespace NLog.LayoutRenderers.Wrappers
         public Layout Else { get; set; }
 
         /// <inheritdoc/>
-        protected override void RenderInnerAndTransform(LogEventInfo logEvent, StringBuilder builder, int orgLength)
+        protected override void Append(StringBuilder builder, LogEventInfo logEvent)
         {
-            if (When == null || true.Equals(When.Evaluate(logEvent)))
+            int orgLength = builder.Length;
+            try
             {
-                Inner.RenderAppendBuilder(logEvent, builder);
+                if (When == null || true.Equals(When.Evaluate(logEvent)))
+                {
+                    Inner?.RenderAppendBuilder(logEvent, builder);
+                }
+                else if (Else != null)
+                {
+                    Else.RenderAppendBuilder(logEvent, builder);
+                }
             }
-            else if (Else != null)
+            catch
             {
-                Else.RenderAppendBuilder(logEvent, builder);
+                builder.Length = orgLength; // Rewind/Truncate on exception
+                throw;
             }
         }
 

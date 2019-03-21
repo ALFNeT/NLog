@@ -1,5 +1,5 @@
 // 
-// Copyright (c) 2004-2018 Jaroslaw Kowalski <jaak@jkowalski.net>, Kim Christensen, Julian Verdurmen
+// Copyright (c) 2004-2019 Jaroslaw Kowalski <jaak@jkowalski.net>, Kim Christensen, Julian Verdurmen
 // 
 // All rights reserved.
 // 
@@ -234,7 +234,7 @@ namespace NLog.Targets.Wrappers
 
         //
         // adapted from:
-        // http://www.codeproject.com/csharp/cpimpersonation1.asp
+        // https://www.codeproject.com/csharp/cpimpersonation1.asp
         //
         private WindowsIdentity CreateWindowsIdentity(out IntPtr handle)
         {

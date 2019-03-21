@@ -1,5 +1,5 @@
 // 
-// Copyright (c) 2004-2018 Jaroslaw Kowalski <jaak@jkowalski.net>, Kim Christensen, Julian Verdurmen
+// Copyright (c) 2004-2019 Jaroslaw Kowalski <jaak@jkowalski.net>, Kim Christensen, Julian Verdurmen
 // 
 // All rights reserved.
 // 
@@ -57,7 +57,7 @@ namespace NLog.Internal
             {
                 builder.Append(value);  // Avoid automatic quotes
             }
-            else if (format == "@")
+            else if (format == MessageTemplates.ValueFormatter.FormatAsJson)
             {
                 ValueFormatter.Instance.FormatValue(value, null, CaptureType.Serialize, formatProvider, builder);
             }
@@ -90,7 +90,7 @@ namespace NLog.Internal
         /// <summary>
         /// Appends uint without using culture, and most importantly without garbage
         /// 
-        /// Credits Gavin Pugh  - http://www.gavpugh.com/2010/04/01/xnac-avoiding-garbage-when-working-with-stringbuilder/
+        /// Credits Gavin Pugh  - https://www.gavpugh.com/2010/04/01/xnac-avoiding-garbage-when-working-with-stringbuilder/
         /// </summary>
         /// <param name="builder"></param>
         /// <param name="value">value to append</param>
@@ -238,6 +238,34 @@ namespace NLog.Internal
         }
 
         /// <summary>
+        /// Scans the StringBuilder for the position of needle character
+        /// </summary>
+        /// <param name="builder">StringBuilder source</param>
+        /// <param name="needles">needle characters to search for</param>
+        /// <param name="startPos"></param>
+        /// <returns>Index of the first occurrence (Else -1)</returns>
+        public static int IndexOfAny(this StringBuilder builder, char[] needles, int startPos = 0)
+        {
+            for (int i = startPos; i < builder.Length; ++i)
+            {
+                if (CharArrayContains(builder[i], needles))
+                    return i;
+            }
+            return -1;
+        }
+
+        private static bool CharArrayContains(char searchChar, char[] needles)
+        {
+            for (int i = 0; i < needles.Length; ++i)
+            {
+                if (needles[i] == searchChar)
+                    return true;
+            }
+
+            return false;
+        }
+
+        /// <summary>
         /// Compares the contents of two StringBuilders
         /// </summary>
         /// <remarks>
@@ -314,29 +342,40 @@ namespace NLog.Internal
                 case TypeCode.Int16: sb.AppendInvariant((short)value); break;
                 case TypeCode.Int32: sb.AppendInvariant((int)value); break;
                 case TypeCode.Int64:
-                {
-                    long int64 = (long)value;
-                    if (int64 < int.MaxValue && int64 > int.MinValue)
-                        sb.AppendInvariant((int)int64);
-                    else
-                        sb.Append(int64);
-                }
+                    {
+                        long int64 = (long)value;
+                        if (int64 < int.MaxValue && int64 > int.MinValue)
+                            sb.AppendInvariant((int)int64);
+                        else
+                            sb.Append(int64);
+                    }
                     break;
                 case TypeCode.UInt16: sb.AppendInvariant((ushort)value); break;
                 case TypeCode.UInt32: sb.AppendInvariant((uint)value); break;
                 case TypeCode.UInt64:
-                {
-                    ulong uint64 = (ulong)value;
-                    if (uint64 < uint.MaxValue)
-                        sb.AppendInvariant((uint)uint64);
-                    else
-                        sb.Append(uint64);
-                }
+                    {
+                        ulong uint64 = (ulong)value;
+                        if (uint64 < uint.MaxValue)
+                            sb.AppendInvariant((uint)uint64);
+                        else
+                            sb.Append(uint64);
+                    }
                     break;
                 default:
                     sb.Append(XmlHelper.XmlConvertToString(value, objTypeCode));
                     break;
             }
+        }
+
+        public static void TrimRight(this StringBuilder sb, int startPos = 0)
+        {
+            int i = sb.Length - 1;
+            for (; i >= startPos; i--)
+                if (!char.IsWhiteSpace(sb[i]))
+                    break;
+
+            if (i < sb.Length - 1)
+                sb.Length = i + 1;
         }
     }
 }

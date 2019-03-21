@@ -1,5 +1,5 @@
 // 
-// Copyright (c) 2004-2018 Jaroslaw Kowalski <jaak@jkowalski.net>, Kim Christensen, Julian Verdurmen
+// Copyright (c) 2004-2019 Jaroslaw Kowalski <jaak@jkowalski.net>, Kim Christensen, Julian Verdurmen
 // 
 // All rights reserved.
 // 
@@ -61,6 +61,20 @@ namespace NLog.Targets
         [ArrayParameter(typeof(MethodCallParameter), "parameter")]
         public IList<MethodCallParameter> Parameters { get; private set; }
 
+        private IPropertyTypeConverter PropertyTypeConverter
+        {
+            get => _propertyTypeConverter ?? (_propertyTypeConverter = ConfigurationItemFactory.Default.PropertyTypeConverter);
+            set => _propertyTypeConverter = value;
+        }
+        private IPropertyTypeConverter _propertyTypeConverter;
+
+        /// <inheritdoc/>
+        protected override void CloseTarget()
+        {
+            PropertyTypeConverter = null;
+            base.CloseTarget();
+        }
+
         /// <summary>
         /// Prepares an array of parameters to be passed based on the logging event and calls DoInvoke().
         /// </summary>
@@ -70,12 +84,37 @@ namespace NLog.Targets
             object[] parameters = Parameters.Count > 0 ? new object[Parameters.Count] : ArrayHelper.Empty<object>();
             for (int i = 0; i < parameters.Length; ++i)
             {
-                var param = Parameters[i];
-                var parameterValue = RenderLogEvent(param.Layout, logEvent.LogEvent);
-                parameters[i] = Convert.ChangeType(parameterValue, param.ParameterType, CultureInfo.InvariantCulture);
+                try
+                {
+                    parameters[i] = GetParameterValue(logEvent.LogEvent, Parameters[i]);
+                }
+                catch (Exception ex)
+                {
+                    if (ex.MustBeRethrownImmediately())
+                        throw;
+
+                    Common.InternalLogger.Warn(ex, "{0}(Name={1}): Failed to get parameter value {2}", GetType(), Name, Parameters[i].Name);
+                    throw;
+                }
             }
 
             DoInvoke(parameters, logEvent);
+        }
+
+        private object GetParameterValue(LogEventInfo logEvent, MethodCallParameter param)
+        {
+            var parameterType = param.ParameterType ?? typeof(string);
+
+            var parameterValue = RenderLogEvent(param.Layout, logEvent) ?? string.Empty;
+            if (parameterType == typeof(string) || parameterType == typeof(object))
+                return parameterValue;
+
+            if (string.IsNullOrEmpty(parameterValue) && parameterType.IsValueType())
+            {
+                return Activator.CreateInstance(param.ParameterType);
+            }
+
+            return PropertyTypeConverter.Convert(parameterValue, parameterType, null, CultureInfo.InvariantCulture);
         }
 
         /// <summary>

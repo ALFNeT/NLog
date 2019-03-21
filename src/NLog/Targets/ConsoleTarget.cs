@@ -1,5 +1,5 @@
 // 
-// Copyright (c) 2004-2018 Jaroslaw Kowalski <jaak@jkowalski.net>, Kim Christensen, Julian Verdurmen
+// Copyright (c) 2004-2019 Jaroslaw Kowalski <jaak@jkowalski.net>, Kim Christensen, Julian Verdurmen
 // 
 // All rights reserved.
 // 
@@ -69,7 +69,7 @@ namespace NLog.Targets
         /// </summary>
         /// <remarks>
         ///   Console.Out.Writeline / Console.Error.Writeline could throw 'IndexOutOfRangeException', which is a bug. 
-        /// See http://stackoverflow.com/questions/33915790/console-out-and-console-error-race-condition-error-in-a-windows-service-written
+        /// See https://stackoverflow.com/questions/33915790/console-out-and-console-error-race-condition-error-in-a-windows-service-written
         /// and https://connect.microsoft.com/VisualStudio/feedback/details/2057284/console-out-probable-i-o-race-condition-issue-in-multi-threaded-windows-service
         ///             
         /// Full error: 
@@ -156,10 +156,12 @@ namespace NLog.Targets
                     InternalLogger.Info("Console has been detected as turned off. Disable DetectConsoleAvailable to skip detection. Reason: {0}", reason);
                 }
             }
+
 #if !SILVERLIGHT && !__IOS__ && !__ANDROID__
-            if (_encoding != null && !_pauseLogging)
-                Console.OutputEncoding = _encoding;
+            if (_encoding != null)
+                ConsoleTargetHelper.SetConsoleOutputEncoding(_encoding, true, _pauseLogging);
 #endif
+
             base.InitializeTarget();
             if (Header != null)
             {

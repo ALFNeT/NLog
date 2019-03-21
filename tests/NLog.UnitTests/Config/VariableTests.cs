@@ -1,5 +1,5 @@
 // 
-// Copyright (c) 2004-2018 Jaroslaw Kowalski <jaak@jkowalski.net>, Kim Christensen, Julian Verdurmen
+// Copyright (c) 2004-2019 Jaroslaw Kowalski <jaak@jkowalski.net>, Kim Christensen, Julian Verdurmen
 // 
 // All rights reserved.
 // 
@@ -45,7 +45,7 @@ namespace NLog.UnitTests.Config
         [Fact]
         public void VariablesTest1()
         {
-            var configuration = CreateConfigurationFromString(@"
+            var configuration = XmlLoggingConfiguration.CreateFromXmlString(@"
 <nlog throwExceptions='true'>
     <variable name='prefix' value='[[' />
     <variable name='suffix' value=']]' />
@@ -76,7 +76,7 @@ namespace NLog.UnitTests.Config
         [Fact]
         public void VariablesTest_string_expanding()
         {
-            var configuration = CreateConfigurationFromString(@"
+            var configuration = XmlLoggingConfiguration.CreateFromXmlString(@"
 <nlog throwExceptions='true'>
   <variable name='test' value='hello'/>
   <targets>
@@ -94,11 +94,11 @@ namespace NLog.UnitTests.Config
         [Fact]
         public void VariablesTest_minLevel_expanding()
         {
-            var configuration = CreateConfigurationFromString(@"
+            var configuration = XmlLoggingConfiguration.CreateFromXmlString(@"
 <nlog throwExceptions='true'>
    <variable name='test' value='debug'/>
     <rules>
-      <logger minLevel='${test}'/>
+      <logger minLevel='${test}' final='true' />
     </rules>
 </nlog>");
 
@@ -119,11 +119,11 @@ namespace NLog.UnitTests.Config
         [Fact]
         public void VariablesTest_Level_expanding()
         {
-            var configuration = CreateConfigurationFromString(@"
+            var configuration = XmlLoggingConfiguration.CreateFromXmlString(@"
 <nlog throwExceptions='true'>
    <variable name='test' value='debug'/>
     <rules>
-      <logger level='${test}'/>
+      <logger level='${test}' final='true' />
     </rules>
 </nlog>");
 
@@ -141,7 +141,7 @@ namespace NLog.UnitTests.Config
         [Fact]
         public void Xml_configuration_returns_defined_variables()
         {
-            var configuration = CreateConfigurationFromString(@"
+            var configuration = XmlLoggingConfiguration.CreateFromXmlString(@"
 <nlog throwExceptions='true'>
     <variable name='prefix' value='[[' />
     <variable name='suffix' value=']]' />
@@ -185,11 +185,11 @@ namespace NLog.UnitTests.Config
                     </nlog>";
 
             NLogConfigurationException nlogConfEx_ForInnerTargets = Assert.Throws<NLogConfigurationException>(
-                () => CreateConfigurationFromString(configurationString_VariableNodeIsInnerTargets)
+                () => XmlLoggingConfiguration.CreateFromXmlString(configurationString_VariableNodeIsInnerTargets)
                 );
 
             NLogConfigurationException nlogConfExForAfterTargets = Assert.Throws<NLogConfigurationException>(
-                () => CreateConfigurationFromString(configurationString_VariableNodeIsAfterTargets)
+                () => XmlLoggingConfiguration.CreateFromXmlString(configurationString_VariableNodeIsAfterTargets)
                 );
         }
     }

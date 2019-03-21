@@ -1,5 +1,5 @@
 // 
-// Copyright (c) 2004-2018 Jaroslaw Kowalski <jaak@jkowalski.net>, Kim Christensen, Julian Verdurmen
+// Copyright (c) 2004-2019 Jaroslaw Kowalski <jaak@jkowalski.net>, Kim Christensen, Julian Verdurmen
 // 
 // All rights reserved.
 // 
@@ -37,13 +37,17 @@ namespace NLog.Internal.NetworkSenders
     using System.Collections.Generic;
     using System.IO;
     using System.Net.Sockets;
-    using Common;
+    using NLog.Common;
 
     /// <summary>
     /// Sends messages over a TCP network connection.
     /// </summary>
     internal class TcpNetworkSender : NetworkSender
     {
+#if !SILVERLIGHT
+        private static bool? EnableKeepAliveSuccessful;
+#endif
+
         private readonly Queue<SocketAsyncEventArgs> _pendingRequests = new Queue<SocketAsyncEventArgs>();
 
         private ISocket _socket;
@@ -67,18 +71,109 @@ namespace NLog.Internal.NetworkSenders
 
         internal int MaxQueueSize { get; set; }
 
+#if !SILVERLIGHT
+        internal System.Security.Authentication.SslProtocols SslProtocols { get; set; }
+
+        internal TimeSpan KeepAliveTime { get; set; }
+#endif
+
         /// <summary>
         /// Creates the socket with given parameters. 
         /// </summary>
+        /// <param name="host">The host address.</param>
         /// <param name="addressFamily">The address family.</param>
         /// <param name="socketType">Type of the socket.</param>
         /// <param name="protocolType">Type of the protocol.</param>
         /// <returns>Instance of <see cref="ISocket" /> which represents the socket.</returns>
         [System.Diagnostics.CodeAnalysis.SuppressMessage("Microsoft.Reliability", "CA2000:Dispose objects before losing scope", Justification = "This is a factory method")]
-        protected internal virtual ISocket CreateSocket(AddressFamily addressFamily, SocketType socketType, ProtocolType protocolType)
+        protected internal virtual ISocket CreateSocket(string host, AddressFamily addressFamily, SocketType socketType, ProtocolType protocolType)
         {
-            return new SocketProxy(addressFamily, socketType, protocolType);
+            var socketProxy = new SocketProxy(addressFamily, socketType, protocolType);
+
+#if !SILVERLIGHT
+            if (KeepAliveTime.TotalSeconds >= 1.0 && EnableKeepAliveSuccessful != false)
+            {
+                EnableKeepAliveSuccessful = TryEnableKeepAlive(socketProxy.UnderlyingSocket, (int)KeepAliveTime.TotalSeconds);
+            }
+#endif
+
+#if !NETSTANDARD1_0 && !SILVERLIGHT
+            if (SslProtocols != System.Security.Authentication.SslProtocols.None)
+            {
+                return new SslSocketProxy(host, SslProtocols, socketProxy);
+            }
+#endif
+            return socketProxy;
         }
+
+#if !SILVERLIGHT
+        private static bool TryEnableKeepAlive(Socket underlyingSocket, int keepAliveTimeSeconds)
+        {
+            if (TrySetSocketOption(underlyingSocket, SocketOptionName.KeepAlive, true))
+            {
+                // SOCKET OPTION NAME CONSTANT
+                // Ws2ipdef.h (Windows SDK)
+                // #define    TCP_KEEPALIVE      3
+                // #define    TCP_KEEPINTVL      17
+                SocketOptionName TcpKeepAliveTime = (SocketOptionName)0x3;
+                SocketOptionName TcpKeepAliveInterval = (SocketOptionName)0x11;
+
+                if (PlatformDetector.CurrentOS == RuntimeOS.Linux)
+                {
+                    // https://github.com/torvalds/linux/blob/v4.16/include/net/tcp.h
+                    // #define    TCP_KEEPIDLE            4              /* Start keeplives after this period */
+                    // #define    TCP_KEEPINTVL           5              /* Interval between keepalives */
+                    TcpKeepAliveTime = (SocketOptionName)0x4;
+                    TcpKeepAliveInterval = (SocketOptionName)0x5;
+                }
+                else if (PlatformDetector.CurrentOS == RuntimeOS.MacOSX)
+                {
+                    // https://opensource.apple.com/source/xnu/xnu-4570.41.2/bsd/netinet/tcp.h.auto.html
+                    // #define    TCP_KEEPALIVE      0x10                      /* idle time used when SO_KEEPALIVE is enabled */
+                    // #define    TCP_KEEPINTVL      0x101                     /* interval between keepalives */
+                    TcpKeepAliveTime = (SocketOptionName)0x10;
+                    TcpKeepAliveInterval = (SocketOptionName)0x101;
+                }
+
+                if (TrySetTcpOption(underlyingSocket, TcpKeepAliveTime, keepAliveTimeSeconds))
+                {
+                    // Configure retransmission interval when missing acknowlege of keep-alive-probe
+                    TrySetTcpOption(underlyingSocket, TcpKeepAliveInterval, 1); // Default 1 sec on Windows (75 sec on Linux)
+                    return true;
+                }
+            }
+
+            return false;
+        }
+
+        private static bool TrySetSocketOption(Socket underlyingSocket, SocketOptionName socketOption, bool value)
+        {
+            try
+            {
+                underlyingSocket.SetSocketOption(SocketOptionLevel.Socket, socketOption, value);
+                return true;
+            }
+            catch (Exception ex)
+            {
+                InternalLogger.Warn(ex, "NetworkTarget: Failed to configure Socket-option {0} = {1}", socketOption, value);
+                return false;
+            }
+        }
+
+        private static bool TrySetTcpOption(Socket underlyingSocket, SocketOptionName socketOption, int value)
+        {
+            try
+            {
+                underlyingSocket.SetSocketOption(SocketOptionLevel.Tcp, socketOption, value);
+                return true;
+            }
+            catch (Exception ex)
+            {
+                InternalLogger.Warn(ex, "NetworkTarget: Failed to configure TCP-option {0} = {1}", socketOption, value);
+                return false;
+            }
+        }
+#endif
 
         /// <summary>
         /// Performs sender-specific initialization.
@@ -86,15 +181,33 @@ namespace NLog.Internal.NetworkSenders
         [System.Diagnostics.CodeAnalysis.SuppressMessage("Microsoft.Reliability", "CA2000:Dispose objects before losing scope", Justification = "Object is disposed in the event handler.")]
         protected override void DoInitialize()
         {
+            var uri = new Uri(Address);
             var args = new MySocketAsyncEventArgs();
             args.RemoteEndPoint = ParseEndpointAddress(new Uri(Address), AddressFamily);
             args.Completed += SocketOperationCompleted;
             args.UserToken = null;
 
-            _socket = CreateSocket(args.RemoteEndPoint.AddressFamily, SocketType.Stream, ProtocolType.Tcp);
+            _socket = CreateSocket(uri.Host, args.RemoteEndPoint.AddressFamily, SocketType.Stream, ProtocolType.Tcp);
             _asyncOperationInProgress = true;
 
-            if (!_socket.ConnectAsync(args))
+            bool asyncOperation = false;
+            try
+            {
+                asyncOperation = _socket.ConnectAsync(args);
+            }
+            catch (SocketException ex)
+            {
+                args.SocketError = ex.SocketErrorCode;
+            }
+            catch (Exception ex)
+            {
+                if (ex.InnerException is SocketException socketException)
+                    args.SocketError = socketException.SocketErrorCode;
+                else
+                    args.SocketError = SocketError.OperationAborted;
+            }
+
+            if (!asyncOperation)
             {
                 SocketOperationCompleted(_socket, args);
             }
@@ -106,7 +219,7 @@ namespace NLog.Internal.NetworkSenders
         /// <param name="continuation">The continuation.</param>
         protected override void DoClose(AsyncContinuation continuation)
         {
-            lock (this)
+            lock (_pendingRequests)
             {
                 if (_asyncOperationInProgress)
                 {
@@ -125,7 +238,7 @@ namespace NLog.Internal.NetworkSenders
         /// <param name="continuation">The continuation.</param>
         protected override void DoFlush(AsyncContinuation continuation)
         {
-            lock (this)
+            lock (_pendingRequests)
             {
                 if (!_asyncOperationInProgress && _pendingRequests.Count == 0)
                 {
@@ -154,7 +267,7 @@ namespace NLog.Internal.NetworkSenders
             args.UserToken = asyncContinuation;
             args.Completed += SocketOperationCompleted;
 
-            lock (this)
+            lock (_pendingRequests)
             {
                 if (MaxQueueSize != 0 && _pendingRequests.Count >= MaxQueueSize)
                 {
@@ -199,14 +312,14 @@ namespace NLog.Internal.NetworkSenders
 
         private void SocketOperationCompleted(object sender, SocketAsyncEventArgs e)
         {
-            lock (this)
+            lock (_pendingRequests)
             {
                 _asyncOperationInProgress = false;
                 var asyncContinuation = e.UserToken as AsyncContinuation;
 
                 if (e.SocketError != SocketError.Success)
                 {
-                    _pendingError = new IOException("Error: " + e.SocketError);
+                    _pendingError = new IOException($"Error: " + e.SocketError);
                 }
 
                 e.Dispose();
@@ -224,7 +337,7 @@ namespace NLog.Internal.NetworkSenders
         {
             SocketAsyncEventArgs args;
 
-            lock (this)
+            lock (_pendingRequests)
             {
                 if (_asyncOperationInProgress)
                 {
@@ -264,7 +377,25 @@ namespace NLog.Internal.NetworkSenders
                 args = _pendingRequests.Dequeue();
 
                 _asyncOperationInProgress = true;
-                if (!_socket.SendAsync(args))
+
+                bool asyncOperation = false;
+                try
+                {
+                    asyncOperation = _socket.SendAsync(args);
+                }
+                catch (SocketException ex)
+                {
+                    args.SocketError = ex.SocketErrorCode;
+                }
+                catch (Exception ex)
+                {
+                    if (ex.InnerException is SocketException socketException)
+                        args.SocketError = socketException.SocketErrorCode;
+                    else
+                        args.SocketError = SocketError.OperationAborted;
+                }
+
+                if (!asyncOperation)
                 {
                     SocketOperationCompleted(_socket, args);
                 }

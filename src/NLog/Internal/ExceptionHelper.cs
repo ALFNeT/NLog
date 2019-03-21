@@ -1,5 +1,5 @@
 // 
-// Copyright (c) 2004-2018 Jaroslaw Kowalski <jaak@jkowalski.net>, Kim Christensen, Julian Verdurmen
+// Copyright (c) 2004-2019 Jaroslaw Kowalski <jaak@jkowalski.net>, Kim Christensen, Julian Verdurmen
 // 
 // All rights reserved.
 // 
@@ -127,6 +127,32 @@ namespace NLog.Internal
                 return true;
             }
 
+#if DEBUG
+            if (exception is InvalidCastException)
+            {
+                return true;
+            }
+            if (exception is NullReferenceException)
+            {
+                return true;
+            }
+            if (exception is DivideByZeroException)
+            {
+                return true;
+            }
+            if (exception is OverflowException)
+            {
+                return true;
+            }
+            if (exception is InvalidOperationException)
+            {
+                return true;    // Ex. Collection was modified
+            }
+            if (exception is IndexOutOfRangeException)
+            {
+                return true;
+            }
+#endif
             return false;
         }
     }

@@ -1,5 +1,5 @@
 // 
-// Copyright (c) 2004-2018 Jaroslaw Kowalski <jaak@jkowalski.net>, Kim Christensen, Julian Verdurmen
+// Copyright (c) 2004-2019 Jaroslaw Kowalski <jaak@jkowalski.net>, Kim Christensen, Julian Verdurmen
 // 
 // All rights reserved.
 // 
@@ -90,7 +90,7 @@ namespace NLog.Internal
         /// <param name="type"></param>
         /// <returns></returns>
         /// <remarks>This is a work around, as Type doesn't have this property. 
-        /// From: http://stackoverflow.com/questions/1175888/determine-if-a-type-is-static
+        /// From: https://stackoverflow.com/questions/1175888/determine-if-a-type-is-static
         /// </remarks>
         public static bool IsStaticClass(this Type type)
         {
@@ -178,6 +178,15 @@ namespace NLog.Internal
             return type.GetTypeInfo().IsPrimitive;
 #else
             return type.IsPrimitive;
+#endif
+        }
+
+        public static bool IsValueType(this Type type)
+        {
+#if NETSTANDARD1_0
+            return type.GetTypeInfo().IsValueType;
+#else
+            return type.IsValueType;
 #endif
         }
 

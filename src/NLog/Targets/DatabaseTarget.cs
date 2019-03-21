@@ -1,5 +1,5 @@
 // 
-// Copyright (c) 2004-2018 Jaroslaw Kowalski <jaak@jkowalski.net>, Kim Christensen, Julian Verdurmen
+// Copyright (c) 2004-2019 Jaroslaw Kowalski <jaak@jkowalski.net>, Kim Christensen, Julian Verdurmen
 // 
 // All rights reserved.
 // 
@@ -41,8 +41,9 @@ namespace NLog.Targets
 
     using System.Data;
     using System.Data.Common;
-    using System.Globalization;
+#if NETSTANDARD
     using System.Reflection;
+#endif
     using System.Text;
 #if !NETSTANDARD1_0
     using System.Transactions;
@@ -83,7 +84,7 @@ namespace NLog.Targets
     [Target("Database")]
     public class DatabaseTarget : Target, IInstallable
     {
-        private IDbConnection _activeConnection = null;
+        private IDbConnection _activeConnection;
         private string _activeConnectionString;
 
         /// <summary>
@@ -91,7 +92,6 @@ namespace NLog.Targets
         /// </summary>
         public DatabaseTarget()
         {
-            Parameters = new List<DatabaseParameterInfo>();
             InstallDdlCommands = new List<DatabaseCommandInfo>();
             UninstallDdlCommands = new List<DatabaseCommandInfo>();
             DBProvider = "sqlserver";
@@ -120,13 +120,13 @@ namespace NLog.Targets
         /// The parameter name should be a provider invariant name as registered in machine.config or app.config. Common values are:
         /// </para>
         /// <ul>
-        /// <li><c>System.Data.SqlClient</c> - <see href="http://msdn.microsoft.com/en-us/library/system.data.sqlclient.aspx">SQL Sever Client</see></li>
-        /// <li><c>System.Data.SqlServerCe.3.5</c> - <see href="http://www.microsoft.com/sqlserver/2005/en/us/compact.aspx">SQL Sever Compact 3.5</see></li>
-        /// <li><c>System.Data.OracleClient</c> - <see href="http://msdn.microsoft.com/en-us/library/system.data.oracleclient.aspx">Oracle Client from Microsoft</see> (deprecated in .NET Framework 4)</li>
-        /// <li><c>Oracle.DataAccess.Client</c> - <see href="http://www.oracle.com/technology/tech/windows/odpnet/index.html">ODP.NET provider from Oracle</see></li>
+        /// <li><c>System.Data.SqlClient</c> - <see href="https://msdn.microsoft.com/en-us/library/system.data.sqlclient.aspx">SQL Sever Client</see></li>
+        /// <li><c>System.Data.SqlServerCe.3.5</c> - <see href="https://www.microsoft.com/sqlserver/2005/en/us/compact.aspx">SQL Sever Compact 3.5</see></li>
+        /// <li><c>System.Data.OracleClient</c> - <see href="https://msdn.microsoft.com/en-us/library/system.data.oracleclient.aspx">Oracle Client from Microsoft</see> (deprecated in .NET Framework 4)</li>
+        /// <li><c>Oracle.DataAccess.Client</c> - <see href="https://www.oracle.com/technology/tech/windows/odpnet/index.html">ODP.NET provider from Oracle</see></li>
         /// <li><c>System.Data.SQLite</c> - <see href="http://sqlite.phxsoftware.com/">System.Data.SQLite driver for SQLite</see></li>
-        /// <li><c>Npgsql</c> - <see href="http://npgsql.projects.postgresql.org/">Npgsql driver for PostgreSQL</see></li>
-        /// <li><c>MySql.Data.MySqlClient</c> - <see href="http://www.mysql.com/downloads/connector/net/">MySQL Connector/Net</see></li>
+        /// <li><c>Npgsql</c> - <see href="https://www.npgsql.org/">Npgsql driver for PostgreSQL</see></li>
+        /// <li><c>MySql.Data.MySqlClient</c> - <see href="https://www.mysql.com/downloads/connector/net/">MySQL Connector/Net</see></li>
         /// </ul>
         /// <para>(Note that provider invariant names are not supported on .NET Compact Framework).</para>
         /// <para>
@@ -146,7 +146,7 @@ namespace NLog.Targets
 
 #if !NETSTANDARD
         /// <summary>
-        /// Gets or sets the name of the connection string (as specified in <see href="http://msdn.microsoft.com/en-us/library/bf7sd233.aspx">&lt;connectionStrings&gt; configuration section</see>.
+        /// Gets or sets the name of the connection string (as specified in <see href="https://msdn.microsoft.com/en-us/library/bf7sd233.aspx">&lt;connectionStrings&gt; configuration section</see>.
         /// </summary>
         /// <docgen category='Connection Options' order='10' />
         public string ConnectionStringName { get; set; }
@@ -264,9 +264,9 @@ namespace NLog.Targets
         /// Gets the collection of parameters. Each parameter contains a mapping
         /// between NLog layout and a database named or positional parameter.
         /// </summary>
-        /// <docgen category='SQL Statement' order='12' />
+        /// <docgen category='SQL Statement' order='14' />
         [ArrayParameter(typeof(DatabaseParameterInfo), "parameter")]
-        public IList<DatabaseParameterInfo> Parameters { get; private set; }
+        public IList<DatabaseParameterInfo> Parameters { get; } = new List<DatabaseParameterInfo>();
 
 #if !NETSTANDARD
         internal DbProviderFactory ProviderFactory { get; set; }
@@ -276,6 +276,15 @@ namespace NLog.Targets
 #endif
 
         internal Type ConnectionType { get; set; }
+
+        private IPropertyTypeConverter PropertyTypeConverter
+        {
+            get => _propertyTypeConverter ?? (_propertyTypeConverter = ConfigurationItemFactory.Default.PropertyTypeConverter);
+            set => _propertyTypeConverter = value;
+        }
+        private IPropertyTypeConverter _propertyTypeConverter;
+
+        SortHelpers.KeySelector<AsyncLogEventInfo, string> _buildConnectionStringDelegate;
 
         /// <summary>
         /// Performs installation which requires administrative permissions.
@@ -402,19 +411,7 @@ namespace NLog.Targets
 #if !NETSTANDARD
             if (string.IsNullOrEmpty(providerName))
             {
-                string dbProvider = DBProvider?.Trim() ?? string.Empty;
-                if (!string.IsNullOrEmpty(dbProvider))
-                {
-                    foreach (DataRow row in DbProviderFactories.GetFactoryClasses().Rows)
-                    {
-                        var invariantname = (string)row["InvariantName"];
-                        if (string.Equals(invariantname, dbProvider, StringComparison.OrdinalIgnoreCase))
-                        {
-                            providerName = invariantname;
-                            break;
-                        }
-                    }
-                }
+                providerName = GetProviderNameFromDbProviderFactories(providerName);
             }
 
             if (!string.IsNullOrEmpty(providerName))
@@ -450,6 +447,27 @@ namespace NLog.Targets
             }
         }
 
+#if !NETSTANDARD
+        private string GetProviderNameFromDbProviderFactories(string providerName)
+        {
+            string dbProvider = DBProvider?.Trim() ?? string.Empty;
+            if (!string.IsNullOrEmpty(dbProvider))
+            {
+                foreach (DataRow row in DbProviderFactories.GetFactoryClasses().Rows)
+                {
+                    var invariantname = (string)row["InvariantName"];
+                    if (string.Equals(invariantname, dbProvider, StringComparison.OrdinalIgnoreCase))
+                    {
+                        providerName = invariantname;
+                        break;
+                    }
+                }
+            }
+
+            return providerName;
+        }
+#endif
+
         /// <summary>
         /// Set the <see cref="ConnectionType"/> to use it for opening connections to the database.
         /// </summary>
@@ -461,12 +479,11 @@ namespace NLog.Targets
                 case "MSSQL":
                 case "MICROSOFT":
                 case "MSDE":
-#if NETSTANDARD
                 case "SYSTEM.DATA.SQLCLIENT":
                     {
+#if NETSTANDARD
                         var assembly = Assembly.Load(new AssemblyName("System.Data.SqlClient"));
 #else
-                    {
                         var assembly = typeof(IDbConnection).GetAssembly();
 #endif
                         ConnectionType = assembly.GetType("System.Data.SqlClient.SqlConnection", true, true);
@@ -479,14 +496,18 @@ namespace NLog.Targets
                         ConnectionType = assembly.GetType("System.Data.OleDb.OleDbConnection", true, true);
                         break;
                     }
-
+#endif
                 case "ODBC":
+                case "SYSTEM.DATA.ODBC":
                     {
+#if NETSTANDARD
+                        var assembly = Assembly.Load(new AssemblyName("System.Data.Odbc"));
+#else
                         var assembly = typeof(IDbConnection).GetAssembly();
+#endif
                         ConnectionType = assembly.GetType("System.Data.Odbc.OdbcConnection", true, true);
                         break;
                     }
-#endif
                 default:
                     ConnectionType = Type.GetType(DBProvider, true, true);
                     break;
@@ -498,6 +519,7 @@ namespace NLog.Targets
         /// </summary>
         protected override void CloseTarget()
         {
+            PropertyTypeConverter = null;
             base.CloseTarget();
             InternalLogger.Trace("DatabaseTarget(Name={0}): Close connection because of CloseTarget", Name);
             CloseConnection();
@@ -513,7 +535,7 @@ namespace NLog.Targets
         {
             try
             {
-                WriteEventToDatabase(logEvent);
+                WriteEventToDatabase(logEvent, BuildConnectionString(logEvent));
             }
             catch (Exception exception)
             {
@@ -560,7 +582,10 @@ namespace NLog.Targets
         /// <param name="logEvents">Logging events to be written out.</param>
         protected override void Write(IList<AsyncLogEventInfo> logEvents)
         {
-            var buckets = logEvents.BucketSort(c => BuildConnectionString(c.LogEvent));
+            if (_buildConnectionStringDelegate == null)
+                _buildConnectionStringDelegate = (l) => BuildConnectionString(l.LogEvent);
+
+            var buckets = logEvents.BucketSort(_buildConnectionStringDelegate);
 
             try
             {
@@ -572,7 +597,7 @@ namespace NLog.Targets
 
                         try
                         {
-                            WriteEventToDatabase(ev.LogEvent);
+                            WriteEventToDatabase(ev.LogEvent, kvp.Key);
                             ev.Continuation(null);
                         }
                         catch (Exception exception)
@@ -606,23 +631,22 @@ namespace NLog.Targets
             }
         }
 
+        /// <summary>
+        /// Write logEvent to database
+        /// </summary>
         [System.Diagnostics.CodeAnalysis.SuppressMessage("Microsoft.Security", "CA2100:Review SQL queries for security vulnerabilities", Justification = "It's up to the user to ensure proper quoting.")]
-        private void WriteEventToDatabase(LogEventInfo logEvent)
+        private void WriteEventToDatabase(LogEventInfo logEvent, string connectionString)
         {
+            var commandText = RenderLogEvent(CommandText, logEvent);
+            InternalLogger.Trace("DatabaseTarget(Name={0}): Executing {1}: {2}", Name, CommandType, commandText);
+
             //Always suppress transaction so that the caller does not rollback logging if they are rolling back their transaction.
             using (TransactionScope transactionScope = new TransactionScope(TransactionScopeOption.Suppress))
             {
-                EnsureConnectionOpen(BuildConnectionString(logEvent));
+                EnsureConnectionOpen(connectionString);
 
-                using (IDbCommand command = _activeConnection.CreateCommand())
+                using (IDbCommand command = CreateDbCommandWithParameters(logEvent, CommandType, commandText, Parameters))
                 {
-                    command.CommandText = RenderLogEvent(CommandText, logEvent);
-                    command.CommandType = CommandType;
-
-                    InternalLogger.Trace("DatabaseTarget(Name={0}): Executing {1}: {2}", Name, command.CommandType, command.CommandText);
-
-                    AddParametersToCommand(command, Parameters, logEvent);
-
                     int result = command.ExecuteNonQuery();
                     InternalLogger.Trace("DatabaseTarget(Name={0}): Finished execution, result = {1}", Name, result);
                 }
@@ -631,6 +655,27 @@ namespace NLog.Targets
                 transactionScope.Complete();
             }
         }
+
+        [System.Diagnostics.CodeAnalysis.SuppressMessage("Microsoft.Security", "CA2100:Review SQL queries for security vulnerabilities", Justification = "It's up to the user to ensure proper quoting.")]
+        private IDbCommand CreateDbCommandWithParameters(LogEventInfo logEvent, CommandType commandType, string dbCommandText, IList<DatabaseParameterInfo> databaseParameterInfos)
+        {
+            var dbCommand = _activeConnection.CreateCommand();
+            dbCommand.CommandType = commandType;
+            dbCommand.CommandText = dbCommandText;
+
+            for (int i = 0; i < databaseParameterInfos.Count; ++i)
+            {
+                var parameterInfo = databaseParameterInfos[i];
+                var dbParameter = CreateDatabaseParameter(dbCommand, parameterInfo);
+                var dbParameterValue = GetDatabaseParameterValue(logEvent, parameterInfo);
+                dbParameter.Value = dbParameterValue;
+                dbCommand.Parameters.Add(dbParameter);
+                InternalLogger.Trace("  DatabaseTarget: Parameter: '{0}' = '{1}' ({2})", dbParameter.ParameterName, dbParameter.Value, dbParameter.DbType);
+            }
+
+            return dbCommand;
+        }
+
         /// <summary>
         /// Build the connectionstring from the properties. 
         /// </summary>
@@ -676,13 +721,10 @@ namespace NLog.Targets
 
         private void EnsureConnectionOpen(string connectionString)
         {
-            if (_activeConnection != null)
+            if (_activeConnection != null && _activeConnectionString != connectionString)
             {
-                if (_activeConnectionString != connectionString)
-                {
-                    InternalLogger.Trace("DatabaseTarget(Name={0}): Close connection because of opening new.", Name);
-                    CloseConnection();
-                }
+                InternalLogger.Trace("DatabaseTarget(Name={0}): Close connection because of opening new.", Name);
+                CloseConnection();
             }
 
             if (_activeConnection != null)
@@ -697,12 +739,13 @@ namespace NLog.Targets
 
         private void CloseConnection()
         {
+            _activeConnectionString = null;
+
             if (_activeConnection != null)
             {
                 _activeConnection.Close();
                 _activeConnection.Dispose();
                 _activeConnection = null;
-                _activeConnectionString = null;
             }
         }
 
@@ -742,16 +785,14 @@ namespace NLog.Targets
 
                     EnsureConnectionOpen(cs);
 
-                    using (IDbCommand command = _activeConnection.CreateCommand())
+                    string commandText = RenderLogEvent(commandInfo.Text, logEvent);
+
+                    installationContext.Trace("DatabaseTarget(Name={0}) - Executing {1} '{2}'", Name, commandInfo.CommandType, commandText);
+
+                    using (IDbCommand command = CreateDbCommandWithParameters(logEvent, commandInfo.CommandType, commandText, commandInfo.Parameters))
                     {
-                        command.CommandType = commandInfo.CommandType;
-                        command.CommandText = RenderLogEvent(commandInfo.Text, logEvent);
-
-                        AddParametersToCommand(command, commandInfo.Parameters, logEvent);
-
                         try
                         {
-                            installationContext.Trace("DatabaseTarget(Name={0}) - Executing {1} '{2}'", Name, command.CommandType, command.CommandText);
                             command.ExecuteNonQuery();
                         }
                         catch (Exception exception)
@@ -783,45 +824,153 @@ namespace NLog.Targets
         }
 
         /// <summary>
-        /// Adds the given list of DatabaseParameterInfo to the given IDbCommand after transforming them into IDbDataParameters.
+        /// Create database parameter
         /// </summary>
-        /// <param name="command">The IDbCommand to add parameters to</param>
-        /// <param name="databaseParameterInfos">The list of DatabaseParameterInfo to transform into IDbDataParameters and to add to the IDbCommand</param>
-        /// <param name="logEvent">The log event to base the parameter's layout rendering on.</param>
-        private void AddParametersToCommand(IDbCommand command, IList<DatabaseParameterInfo> databaseParameterInfos, LogEventInfo logEvent)
+        /// <param name="command">Current command.</param>
+        /// <param name="parameterInfo">Parameter configuration info.</param>
+        protected virtual IDbDataParameter CreateDatabaseParameter(IDbCommand command, DatabaseParameterInfo parameterInfo)
         {
-            for(int i = 0; i < databaseParameterInfos.Count; ++i)
+            IDbDataParameter dbParameter = command.CreateParameter();
+            dbParameter.Direction = ParameterDirection.Input;
+            if (parameterInfo.Name != null)
             {
-                DatabaseParameterInfo par = databaseParameterInfos[i];
-                IDbDataParameter p = command.CreateParameter();
-                p.Direction = ParameterDirection.Input;
-                if (par.Name != null)
-                {
-                    p.ParameterName = par.Name;
-                }
-
-                if (par.Size != 0)
-                {
-                    p.Size = par.Size;
-                }
-
-                if (par.Precision != 0)
-                {
-                    p.Precision = par.Precision;
-                }
-
-                if (par.Scale != 0)
-                {
-                    p.Scale = par.Scale;
-                }
-
-                string stringValue = RenderLogEvent(par.Layout, logEvent);
-
-                p.Value = stringValue;
-                command.Parameters.Add(p);
-
-                InternalLogger.Trace("  DatabaseTarget: Parameter: '{0}' = '{1}' ({2})", p.ParameterName, p.Value, p.DbType);
+                dbParameter.ParameterName = parameterInfo.Name;
             }
+
+            if (parameterInfo.Size != 0)
+            {
+                dbParameter.Size = parameterInfo.Size;
+            }
+
+            if (parameterInfo.Precision != 0)
+            {
+                dbParameter.Precision = parameterInfo.Precision;
+            }
+
+            if (parameterInfo.Scale != 0)
+            {
+                dbParameter.Scale = parameterInfo.Scale;
+            }
+
+            try
+            {
+                if (!parameterInfo.SetDbType(dbParameter))
+                {
+                    InternalLogger.Warn("  DatabaseTarget: Parameter: '{0}' - Failed to assign DbType={1}", parameterInfo.Name, parameterInfo.DbType);
+                }
+            }
+            catch (Exception ex)
+            {
+                if (ex.MustBeRethrownImmediately())
+                    throw;
+
+                InternalLogger.Error(ex, "  DatabaseTarget: Parameter: '{0}' - Failed to assign DbType={1}", parameterInfo.Name, parameterInfo.DbType);
+
+                if (ex.MustBeRethrown())
+                    throw;
+            }
+
+            return dbParameter;
+        }
+
+        /// <summary>
+        /// Extract parameter value from the logevent
+        /// </summary>
+        /// <param name="logEvent">Current logevent.</param>
+        /// <param name="parameterInfo">Parameter configuration info.</param>
+        protected internal virtual object GetDatabaseParameterValue(LogEventInfo logEvent, DatabaseParameterInfo parameterInfo)
+        {
+            Type dbParameterType = parameterInfo.ParameterType;
+            if (string.IsNullOrEmpty(parameterInfo.Format) && dbParameterType == typeof(string))
+            {
+                return RenderLogEvent(parameterInfo.Layout, logEvent) ?? string.Empty;
+            }
+
+            IFormatProvider dbParameterCulture = GetDbParameterCulture(logEvent, parameterInfo);
+
+            if (TryGetConvertedRawValue(logEvent, parameterInfo, dbParameterType, dbParameterCulture, out var value))
+            {
+                return value ?? CreateDefaultValue(dbParameterType);
+            }
+
+            try
+            {
+                InternalLogger.Trace("  DatabaseTarget: Attempt to convert layout value for '{0}' into {1}", parameterInfo.Name, dbParameterType?.Name);
+                string parameterValue = RenderLogEvent(parameterInfo.Layout, logEvent);
+                if (string.IsNullOrEmpty(parameterValue))
+                {
+                    return CreateDefaultValue(dbParameterType);
+                }
+                return PropertyTypeConverter.Convert(parameterValue, dbParameterType, parameterInfo.Format, dbParameterCulture) ?? DBNull.Value;
+            }
+            catch (Exception ex)
+            {
+                if (ex.MustBeRethrownImmediately())
+                    throw;
+
+                InternalLogger.Warn(ex, "  DatabaseTarget: Failed to convert layout value for '{0}' into {1}", parameterInfo.Name, dbParameterType?.Name);
+
+                if (ex.MustBeRethrown())
+                    throw;
+
+                return CreateDefaultValue(dbParameterType);
+            }
+        }
+
+        private bool TryGetConvertedRawValue(LogEventInfo logEvent, DatabaseParameterInfo parameterInfo, Type dbParameterType,
+            IFormatProvider dbParameterCulture, out object value)
+        {
+            if (parameterInfo.Layout.TryGetRawValue(logEvent, out var rawValue))
+            {
+                try
+                {
+                    InternalLogger.Trace("  DatabaseTarget: Attempt to convert raw value for '{0}' into {1}",
+                        parameterInfo.Name, dbParameterType?.Name);
+                    if (ReferenceEquals(rawValue, DBNull.Value))
+                    {
+                        value = rawValue;
+                        return true;
+                    }
+
+                    value = PropertyTypeConverter.Convert(rawValue, dbParameterType, parameterInfo.Format,
+                            dbParameterCulture);
+                    return true;
+                }
+                catch (Exception ex)
+                {
+                    if (ex.MustBeRethrownImmediately())
+                        throw;
+
+                    InternalLogger.Warn(ex, "  DatabaseTarget: Failed to convert raw value for '{0}' into {1}",
+                        parameterInfo.Name, dbParameterType?.Name);
+
+                    if (ex.MustBeRethrown())
+                        throw;
+                }
+            }
+
+            value = null;
+            return false;
+        }
+
+        /// <summary>
+        /// Create Default Value of Type
+        /// </summary>
+        /// <param name="dbParameterType"></param>
+        /// <returns></returns>
+        private static object CreateDefaultValue(Type dbParameterType)
+        {
+            if (dbParameterType == typeof(string))
+                return string.Empty;
+            else if (dbParameterType.IsValueType())
+                return Activator.CreateInstance(dbParameterType);
+            else
+                return DBNull.Value;
+        }
+
+        private IFormatProvider GetDbParameterCulture(LogEventInfo logEvent, DatabaseParameterInfo parameterInfo)
+        {
+            return parameterInfo.Culture ?? logEvent.FormatProvider ?? LoggingConfiguration?.DefaultCultureInfo;
         }
 
 #if NETSTANDARD1_0

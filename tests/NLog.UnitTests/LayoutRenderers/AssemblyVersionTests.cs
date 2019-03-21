@@ -1,5 +1,5 @@
 // 
-// Copyright (c) 2004-2018 Jaroslaw Kowalski <jaak@jkowalski.net>, Kim Christensen, Julian Verdurmen
+// Copyright (c) 2004-2019 Jaroslaw Kowalski <jaak@jkowalski.net>, Kim Christensen, Julian Verdurmen
 // 
 // All rights reserved.
 // 
@@ -30,6 +30,8 @@
 // ARISING IN ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF 
 // THE POSSIBILITY OF SUCH DAMAGE.
 // 
+
+using NLog.Config;
 
 namespace NLog.UnitTests.LayoutRenderers
 {
@@ -97,7 +99,7 @@ namespace NLog.UnitTests.LayoutRenderers
         [InlineData(AssemblyVersionType.Informational, AssemblyInformationalVersionTest)]
         public void AssemblyVersionTypeTest(AssemblyVersionType type, string expected)
         {
-            LogManager.Configuration = CreateConfigurationFromString(@"
+            LogManager.Configuration = XmlLoggingConfiguration.CreateFromXmlString(@"
             <nlog>
                 <targets><target name='debug' type='Debug' layout='${message:withException=true}|${assembly-version:type=" + type.ToString().ToLower() + @"}' /></targets>
                 <rules><logger name='*' minlevel='Debug' writeTo='debug' /></rules>
@@ -146,7 +148,7 @@ namespace NLog.UnitTests.LayoutRenderers
         [InlineData(AssemblyVersionType.Informational, "Build.Major", "0.Version 1")]
         public void AssemblyVersionFormatAndTypeTest(AssemblyVersionType type, string format, string expected)
         {
-            LogManager.Configuration = CreateConfigurationFromString(@"
+            LogManager.Configuration = XmlLoggingConfiguration.CreateFromXmlString(@"
             <nlog>
                 <targets><target name='debug' type='Debug' layout='${message:withException=true}|${assembly-version:type=" + type.ToString().ToLower() + @":format=" + format + @"}' /></targets>
                 <rules><logger name='*' minlevel='Debug' writeTo='debug' /></rules>

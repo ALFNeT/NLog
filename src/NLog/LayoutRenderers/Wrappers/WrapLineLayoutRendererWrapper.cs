@@ -1,5 +1,5 @@
 // 
-// Copyright (c) 2004-2018 Jaroslaw Kowalski <jaak@jkowalski.net>, Kim Christensen, Julian Verdurmen
+// Copyright (c) 2004-2019 Jaroslaw Kowalski <jaak@jkowalski.net>, Kim Christensen, Julian Verdurmen
 // 
 // All rights reserved.
 // 
@@ -43,6 +43,7 @@ namespace NLog.LayoutRenderers.Wrappers
     /// </summary>
     [LayoutRenderer("wrapline")]
     [AmbientProperty("WrapLine")]
+    [AppDomainFixedOutput]
     [ThreadAgnostic]
     [ThreadSafe]
     public sealed class WrapLineLayoutRendererWrapper : WrapperLayoutRendererBase
@@ -84,8 +85,8 @@ namespace NLog.LayoutRenderers.Wrappers
             // preallocate correct number of chars
             var result = new StringBuilder(text.Length + (text.Length / chunkLength) * Environment.NewLine.Length);
 
-            // based on : http://stackoverflow.com/questions/36788754/how-can-i-limit-the-length-of-a-line-in-nlog/36789394
-            // and : http://stackoverflow.com/questions/1450774/splitting-a-string-into-chunks-of-a-certain-size/8944374#8944374 
+            // based on : https://stackoverflow.com/questions/36788754/how-can-i-limit-the-length-of-a-line-in-nlog/36789394
+            // and : https://stackoverflow.com/questions/1450774/splitting-a-string-into-chunks-of-a-certain-size/8944374#8944374 
             for (int pos = 0; pos < text.Length; pos += chunkLength)
             {
                 if (chunkLength + pos > text.Length)
