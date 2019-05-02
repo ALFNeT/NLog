@@ -54,7 +54,7 @@ namespace NLog.Config
             using (var reader = XmlReader.Create(inputUri))
             {
                 reader.MoveToContent();
-                Parse(reader);
+                Parse(reader, true);
             }
         }
 
@@ -63,9 +63,14 @@ namespace NLog.Config
         /// </summary>
         /// <param name="reader">The reader to initialize element from.</param>
         public NLogXmlElement(XmlReader reader)
+            : this(reader, false)
+        {
+        }
+
+        private NLogXmlElement(XmlReader reader, bool nestedElement)
             : this()
         {
-            Parse(reader);
+            Parse(reader, nestedElement);
         }
 
         /// <summary>
@@ -86,12 +91,12 @@ namespace NLog.Config
         /// <summary>
         /// Gets the dictionary of attribute values.
         /// </summary>
-        public Dictionary<string, string> AttributeValues { get; private set; }
+        public Dictionary<string, string> AttributeValues { get; }
 
         /// <summary>
         /// Gets the collection of child elements.
         /// </summary>
-        public IList<NLogXmlElement> Children { get; private set; }
+        public IList<NLogXmlElement> Children { get; }
 
         /// <summary>
         /// Gets the value of the element.
@@ -104,20 +109,39 @@ namespace NLog.Config
         {
             get
             {
-                if (Children.Count > 0)
+                for (int i = 0; i < Children.Count; ++i)
                 {
-                    for (int i = 0; i < Children.Count; ++i)
+                    var child = Children[i];
+                    if (SingleValueElement(child))
                     {
-                        var child = Children[i];
-                        if (child.Children.Count == 0 && child.AttributeValues.Count == 0 && child.Value != null)
-                            return Children.Where(item => item.Children.Count == 0 && item.AttributeValues.Count == 0 && item.Value != null).Select(item => new KeyValuePair<string, string>(item.Name, item.Value)).Concat(AttributeValues);
+                        // Values assigned using nested node-elements. Maybe in combination with attributes
+                        return Children.Where(item => SingleValueElement(item)).Select(item => new KeyValuePair<string, string>(item.Name, item.Value)).Concat(AttributeValues);
                     }
                 }
                 return AttributeValues;
             }
         }
 
-        IEnumerable<ILoggingConfigurationElement> ILoggingConfigurationElement.Children => Children.Where(item => item.Children.Count > 0 || item.AttributeValues.Count > 0).Cast<ILoggingConfigurationElement>();
+        private static bool SingleValueElement(NLogXmlElement child)
+        {
+            // Node-element that works like an attribute
+            return child.Children.Count == 0 && child.AttributeValues.Count == 0 && child.Value != null;
+        }
+
+        IEnumerable<ILoggingConfigurationElement> ILoggingConfigurationElement.Children
+        {
+            get
+            {
+                for (int i = 0; i < Children.Count; ++i)
+                {
+                    var child = Children[i];
+                    if (!SingleValueElement(child))
+                        return Children.Where(item => !SingleValueElement(item)).Cast<ILoggingConfigurationElement>();
+                }
+
+                return NLog.Internal.ArrayHelper.Empty<ILoggingConfigurationElement>();
+            }
+        }
 
         /// <summary>
         /// Last error occured during configuration read
@@ -180,25 +204,9 @@ namespace NLog.Config
             }
         }
 
-        private void Parse(XmlReader reader)
+        private void Parse(XmlReader reader, bool nestedElement)
         {
-            if (reader.MoveToFirstAttribute())
-            {
-                do
-                {
-                    if (!AttributeValues.ContainsKey(reader.LocalName))
-                    {
-                        AttributeValues.Add(reader.LocalName, reader.Value);
-                    }
-                    else
-                    {
-                        string message = $"Duplicate attribute detected. Attribute name: [{reader.LocalName}]. Duplicate value:[{reader.Value}], Current value:[{AttributeValues[reader.LocalName]}]";
-                        _parsingErrors.Add(message);
-                    }
-                }
-                while (reader.MoveToNextAttribute());
-                reader.MoveToElement();
-            }
+            ParseAttributes(reader, nestedElement);
 
             LocalName = reader.LocalName;
 
@@ -219,10 +227,50 @@ namespace NLog.Config
 
                     if (reader.NodeType == XmlNodeType.Element)
                     {
-                        Children.Add(new NLogXmlElement(reader));
+                        Children.Add(new NLogXmlElement(reader, true));
                     }
                 }
             }
+        }
+
+        private void ParseAttributes(XmlReader reader, bool nestedElement)
+        {
+            if (reader.MoveToFirstAttribute())
+            {
+                do
+                {
+                    if (!nestedElement && IsSpecialXmlAttribute(reader))
+                    {
+                        continue;
+                    }
+
+                    if (!AttributeValues.ContainsKey(reader.LocalName))
+                    {
+                        AttributeValues.Add(reader.LocalName, reader.Value);
+                    }
+                    else
+                    {
+                        string message = $"Duplicate attribute detected. Attribute name: [{reader.LocalName}]. Duplicate value:[{reader.Value}], Current value:[{AttributeValues[reader.LocalName]}]";
+                        _parsingErrors.Add(message);
+                    }
+                }
+                while (reader.MoveToNextAttribute());
+                reader.MoveToElement();
+            }
+        }
+
+        /// <summary>
+        /// Special attribute we could ignore
+        /// </summary>
+        private static bool IsSpecialXmlAttribute(XmlReader reader)
+        {
+            if (reader.LocalName?.Equals("xmlns", StringComparison.OrdinalIgnoreCase) == true)
+                return true;
+            if (reader.Prefix?.Equals("xsi", StringComparison.OrdinalIgnoreCase) == true)
+                return true;
+            if (reader.Prefix?.Equals("xmlns", StringComparison.OrdinalIgnoreCase) == true)
+                return true;
+            return false;
         }
     }
 }

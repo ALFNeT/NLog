@@ -47,7 +47,6 @@ namespace NLog.Layouts
     [ThreadSafe]
     public abstract class XmlElementBase : Layout
     {
-
         private const string DefaultPropertyName = "property";
         private const string DefaultPropertyKeyAttribute = "key";
         private const string DefaultCollectionItemName = "item";
@@ -87,8 +86,7 @@ namespace NLog.Layouts
         /// </summary>
         /// <remarks>Ensures always valid XML, but gives a performance hit</remarks>
         /// <docgen category='XML Options' order='10' />
-        [DefaultValue(true)]
-        public bool ElementEncode { get => _elementValueWrapper.XmlEncode; set => _elementValueWrapper.XmlEncode = value; }
+        internal bool ElementEncodeInternal { get => _elementValueWrapper.XmlEncode; set => _elementValueWrapper.XmlEncode = value; }
 
         /// <summary>
         /// Auto indent and create new lines
@@ -280,7 +278,6 @@ namespace NLog.Layouts
             }
         }
 
-
         /// <summary>
         /// Formats the log event as a XML document for writing.
         /// </summary>
@@ -337,7 +334,7 @@ namespace NLog.Layouts
                         RenderStartElement(sb, ElementNameInternal);
                     }
                     int beforeValueLength = sb.Length;
-                    ElementValueInternal.RenderAppendBuilder(logEvent, sb);
+                    _elementValueWrapper.RenderAppendBuilder(logEvent, sb);
                     if (beforeValueLength == sb.Length && !IncludeEmptyValue)
                     {
                         sb.Length = beforeElementLength;
@@ -715,7 +712,6 @@ namespace NLog.Layouts
                 sb.AppendLine();
         }
 
-
         private void EndXmlDocument(StringBuilder sb, string elementName)
         {
             RenderEndElement(sb, elementName);
@@ -736,7 +732,6 @@ namespace NLog.Layouts
             else
                 return GetType().Name;
         }
-
 
         private static void RenderSelfClosingElement(StringBuilder target, string elementName)
         {

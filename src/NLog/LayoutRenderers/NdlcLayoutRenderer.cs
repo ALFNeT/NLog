@@ -39,7 +39,8 @@ namespace NLog.LayoutRenderers
     using NLog.Config;
 
     /// <summary>
-    /// <see cref="NestedDiagnosticsLogicalContext"/> Renderer (Async scope)
+    /// Render a Nested Diagnostic Logical Context item (Async scope)
+    /// See <see cref="NestedDiagnosticsLogicalContext"/>
     /// </summary>
     [LayoutRenderer("ndlc")]
     [ThreadSafe]
@@ -80,6 +81,15 @@ namespace NLog.LayoutRenderers
         /// <param name="logEvent">Logging event.</param>
         protected override void Append(StringBuilder builder, LogEventInfo logEvent)
         {
+            if (TopFrames == 1)
+            {
+                // Allows fast rendering of topframes=1
+                var topFrame = NestedDiagnosticsLogicalContext.PeekObject();
+                if (topFrame != null)
+                    AppendAsString(topFrame, GetFormatProvider(logEvent), builder);
+                return;
+            }
+
             var messages = NestedDiagnosticsLogicalContext.GetAllObjects();
             if (messages.Length == 0)
                 return;
@@ -100,11 +110,16 @@ namespace NLog.LayoutRenderers
             string currentSeparator = string.Empty;
             for (int i = endPos - 1; i >= startPos; --i)
             {
-                string stringValue = Convert.ToString(messages[i], formatProvider);
                 builder.Append(currentSeparator);
-                builder.Append(stringValue);
+                AppendAsString(messages[i], formatProvider, builder);
                 currentSeparator = Separator;
             }
+        }
+
+        private static void AppendAsString(object message, IFormatProvider formatProvider, StringBuilder builder)
+        {
+            string stringValue = Convert.ToString(message, formatProvider);
+            builder.Append(stringValue);
         }
     }
 #endif

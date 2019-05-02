@@ -72,7 +72,7 @@ namespace NLog.LayoutRenderers
                 layout.Initialize(LoggingConfiguration);
                 if (!layout.ThreadSafe)
                 {
-                    InternalLogger.Warn("${{var={0}}} should be declared as <variable name=\"var_{0}\" value=\"...\" /> and used like this ${var_{{0}}}. Because of unsafe Layout={1}", Name, layout);
+                    InternalLogger.Warn("${{var={0}}} should be declared as <variable name=\"var_{0}\" value=\"...\" /> and used like this ${{var_{0}}}. Because of unsafe Layout={1}", Name, layout);
                 }
             }
 
@@ -87,15 +87,8 @@ namespace NLog.LayoutRenderers
         private bool TryGetLayout(out SimpleLayout layout)
         {
             layout = null;
-            if (Name != null)
-            {
-                //don't use LogManager (locking, recursion)
-                if (LoggingConfiguration?.Variables?.TryGetValue(Name, out layout) == true)
-                {
-                    return true;
-                }
-            }
-            return false;
+            //Note: don't use LogManager (locking, recursion)
+            return Name != null && LoggingConfiguration?.Variables?.TryGetValue(Name, out layout) == true;
         }
 
 

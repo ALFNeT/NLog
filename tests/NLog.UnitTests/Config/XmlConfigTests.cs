@@ -33,6 +33,7 @@
 
 
 using System;
+using System.IO;
 using NLog.Common;
 using NLog.Config;
 using NLog.Targets.Wrappers;
@@ -198,7 +199,7 @@ namespace NLog.UnitTests.Config
             // Arrange
             var xml = @"<nlog>
                     <targets>
-                        <target name='file' type='File' encoding='utf8' layout='${message}' />
+                        <target name='file' type='File' encoding='utf8' layout='${message}' fileName='hello.txt' />
                     </targets>
                     <rules>
                         <logger name='*' minlevel='debug' appendto='file' />
@@ -209,5 +210,69 @@ namespace NLog.UnitTests.Config
             Assert.Single(config.AllTargets);
             Assert.Equal(System.Text.Encoding.UTF8, (config.AllTargets[0] as NLog.Targets.FileTarget)?.Encoding);
         }
+
+        [Fact]
+        public void XmlConfig_ParseFilter_WithoutAttributes()
+        {
+            // Arrange
+            var xml = @"<nlog>
+                    <targets>
+                        <target name='debug' type='Debug' layout='${message}' />
+                    </targets>
+                    <rules>
+                        <logger name='*' minlevel='debug' appendto='debug' defaultFilterResult='ignore'>
+                            <filters>
+                                <whenContains />
+                            </filters>
+                        </logger>
+                    </rules>
+                </nlog>";
+
+            var config = XmlLoggingConfiguration.CreateFromXmlString(xml);
+            Assert.Single(config.LoggingRules);
+            Assert.Single(config.LoggingRules[0].Filters);
+        }
+
+        [Theory]
+        [InlineData("xsi")]
+        [InlineData("test")]
+        public void XmlConfig_attributes_shouldNotLogWarningsToInternalLog(string @namespace)
+        {
+            // Arrange
+            var xml = $@"<?xml version=""1.0"" encoding=""utf-8""?>
+<nlog xmlns=""http://www.nlog-project.org/schemas/NLog.xsd"" 
+      xmlns:{@namespace}=""http://www.w3.org/2001/XMLSchema-instance"" 
+      {@namespace}:schemaLocation=""somewhere"" 
+      {@namespace}:type=""asa""
+      internalLogToConsole=""true"" internalLogLevel=""Warn"">
+</nlog>";
+
+
+            try
+            {
+
+                // ReSharper disable once UnusedVariable
+                var factory = ConfigurationItemFactory.Default; // retrieve factory for calling preload and so won't assert those warnings
+
+                TextWriter textWriter = new StringWriter();
+                InternalLogger.LogWriter = textWriter;
+                InternalLogger.IncludeTimestamp = false;
+
+                // Act
+                XmlLoggingConfiguration.CreateFromXmlString(xml);
+
+                // Assert
+                InternalLogger.LogWriter.Flush();
+
+                var warning = textWriter.ToString();
+                Assert.Equal("", warning);
+            }
+            finally
+            {
+                // cleanup
+                InternalLogger.LogWriter = null;
+            }
+        }
     }
 }
+

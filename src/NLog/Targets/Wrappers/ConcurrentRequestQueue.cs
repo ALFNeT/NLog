@@ -117,12 +117,12 @@ namespace NLog.Targets.Wrappers
 
         private long WaitForBelowRequestLimit()
         {
-            long currentCount = 0;
+            long currentCount;
             bool lockTaken = false;
             try
             {
                 // Attempt to yield using SpinWait
-                currentCount = SpinWait(currentCount);
+                currentCount = TrySpinWaitForLowerCount();
 
                 // If yield did not help, then wait on a lock
                 while (currentCount > RequestLimit)
@@ -159,8 +159,9 @@ namespace NLog.Targets.Wrappers
             return currentCount;
         }
 
-        private long SpinWait(long currentCount)
+        private long TrySpinWaitForLowerCount()
         {
+            long currentCount = 0;
             bool firstYield = true;
             SpinWait spinWait = new SpinWait();
             for (int i = 0; i <= 20; ++i)

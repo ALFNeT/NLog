@@ -4,6 +4,71 @@ Date format: (year/month/day)
 
 ## Change Log
 
+
+
+### V4.6.3 (2019/04/30)
+
+#### Bugfixes
+
+- [#3345](https://github.com/NLog/NLog/pull/3345) Fixed potential memory issue and message duplication with large strings (@snakefoot)
+- [#3316](https://github.com/NLog/NLog/pull/3316) TargetWithContext - serialize MDC and MDLC values properly (@304NotModified)
+
+#### Features
+
+- [#3298](https://github.com/NLog/NLog/pull/3298) Added WithProperty and SetProperty on Logger (@snakefoot)
+- [#3329](https://github.com/NLog/NLog/pull/3329) ${EventProperties} - Added ObjectPath for rendering nested property (@snakefoot, @304NotModified)
+- [#3337](https://github.com/NLog/NLog/pull/3337) ${ShortDate} added support for IRawValue + IStringValueRenderer (@snakefoot)
+- [#3328](https://github.com/NLog/NLog/pull/3328) Added truncate ambient property, e.g. ${message:truncate=80} (@snakefoot)
+- [#3278](https://github.com/NLog/NLog/pull/3278) ConsoleTarget & ColoredConsoleTarget  - Added AutoFlush and improve default flush behavior (@snakefoot)
+
+#### Improvements
+
+- [#3322](https://github.com/NLog/NLog/pull/3322) FileTarget - Introduced EnableFileDeleteSimpleMonitor without FileSystemWatcher for non-Windows (@snakefoot)
+- [#3332](https://github.com/NLog/NLog/pull/3332) LogFactory - GetLogger should validate name of logger (@snakefoot)
+- [#3320](https://github.com/NLog/NLog/pull/3320) FallbackGroupTarget - Fixed potential issue with WINDOWS_PHONE (@snakefoot)
+- [#3261](https://github.com/NLog/NLog/pull/3261) NLog config file loading: use process name (e.g. applicationname.exe.nlog) when app.config is not available (@snakefoot)
+
+#### Performance
+
+- [#3311](https://github.com/NLog/NLog/pull/3311) Split string - avoid allocation of object array. Added StringHelpers.SplitAndTrimTokens (@snakefoot)
+- [#3305](https://github.com/NLog/NLog/pull/3305) AppSettingLayoutRenderer - Mark as ThreadSafe and ThreadAgnostic (@snakefoot)
+
+#### Misc
+
+- [#3338](https://github.com/NLog/NLog/pull/3338) Update docs of various context classes (@304NotModified)
+- [#3288](https://github.com/NLog/NLog/pull/3288) Move NLogPackageLoaders for better unittest debugging experience of NLog (@304NotModified)
+- [#3274](https://github.com/NLog/NLog/pull/3274) Make HttpNetworkSender mockable, add unit test, introduce NSubsitute (@304NotModified)
+- 10 pull requests with refactorings (@snakefoot, @304NotModified)
+
+### V4.6.2 (2019/04/02)
+
+#### Bugfixes
+
+- [#3260](https://github.com/NLog/NLog/pull/3260) Fix escaping nested close brackets when parsing layout renderers (@lobster2012-user)
+- [#3271](https://github.com/NLog/NLog/pull/3271) NLog config - Fixed bug where empty xml-elements were ignored (@snakefoot, @jonreis)
+
+
+### V4.6.1 (2019/03/29)
+
+#### Bugfixes
+
+- [#3199](https://github.com/NLog/NLog/pull/3199) LoggingConfigurationParser - Fixed bug in handling of extensions prefix (@snakefoot)
+- [#3253](https://github.com/NLog/NLog/pull/3253) Fix wrong warnings on `<nlog>` element (only wrong warnings) (#3253) (@snakefoot, @304NotModified)
+- [#3195](https://github.com/NLog/NLog/pull/3195) SimpleStringReader: fix DebuggerDisplay value (#3195) (@lobster2012-user)
+- [#3198](https://github.com/NLog/NLog/pull/3198) XmlLayout - Fixed missing encode of xml element value (@snakefoot)
+- [#3191](https://github.com/NLog/NLog/pull/3191) VariableLayoutRenderer - Fixed format-string for internal logger warning (@snakefoot, @lobster2012-user)
+- [#3258](https://github.com/NLog/NLog/pull/3258) Fix error with Embedded Assembly in LogAssemblyVersion (@snakefoot)
+
+#### Improvements
+
+- [#3255](https://github.com/NLog/NLog/pull/3255) Auto-flush on process exit improvements (@snakefoot)
+- [#3189](https://github.com/NLog/NLog/pull/3189) AsyncTaskTarget - Respect TaskDelayMilliseconds on low activity (@snakefoot)
+
+#### Performance
+
+- [#3256](https://github.com/NLog/NLog/pull/3256) ${NDLC} + ${NDC} - Faster checking when TopFrames = 1 (@snakefoot)
+- [#3201](https://github.com/NLog/NLog/pull/3201) ${GDC} reading is now lockfree (#3201) (@snakefoot)
+
 ### V4.6
 
 #### Features
@@ -24,7 +89,7 @@ Date format: (year/month/day)
 - [#3050](https://github.com/NLog/NLog/pull/3050) Added IncludeGdc property in JsonLayout (@casperc89)
 - [#3071](https://github.com/NLog/NLog/pull/3071) ${HostName} Layout Renderer for full computer DNS name (@amitsaha)
 - [#3053](https://github.com/NLog/NLog/pull/3053) ${AppSetting} Layout Renderer (app.config + web.config) moved from NLog.Extended for NetFramework (@snakefoot)
-- [#3060](https://github.com/NLog/NLog/pull/3060)](https://github.com/NLog/NLog/pull/[#3060](https://github.com/NLog/NLog/pull/3060)) TargetWithContext - Support for PropertyType using IRawValue-interface (@snakefoot)
+- [#3060](https://github.com/NLog/NLog/pull/3060) TargetWithContext - Support for PropertyType using IRawValue-interface (@snakefoot)
 - [#3124](https://github.com/NLog/NLog/pull/3124) NetworkTarget - Added support for KeepAliveTimeSeconds (@snakefoot)
 - [#3129](https://github.com/NLog/NLog/pull/3129) ConfigSetting - Preregister so it can be accessed without extension registration (#3129) (@snakefoot)
 * [#3165](https://github.com/NLog/NLog/pull/3165) Added noRawValue layout wrapper (@snakefoot)
@@ -46,7 +111,8 @@ Date format: (year/month/day)
 - [#3082](https://github.com/NLog/NLog/pull/3082) + [#3100](https://github.com/NLog/NLog/pull/3100)  WebService Target allow custom override of SoapAction-header for Soap11 (@AlexeyRokhin)
 - [#3162](https://github.com/NLog/NLog/pull/3162) ContextProperty with IncludeEmptyValue means default value for ValueType (#3162) (@snakefoot)
 - [#3159](https://github.com/NLog/NLog/pull/3159) AppSettingLayoutRenderer - Include Item for NLog.Extended (@snakefoot)
--  Various refactorings (15+ pull requests) (@beppemarazzi, @304NotModified, @snakefoot)
+- [#3187](https://github.com/NLog/NLog/pull/3187) AsyncTaskTarget - Fixed unwanted delay caused by slow writer   (@snakefoot)
+-  Various refactorings (19 pull requests) (@beppemarazzi, @304NotModified, @snakefoot)
 
 #### Performance
 
@@ -64,11 +130,6 @@ Date format: (year/month/day)
 * [damianh/LibLog#181](https://github.com/damianh/LibLog/pull/181) - Sub-components using LibLog ver. 5.0.3 (or newer) will now use MDLC + NDLC (Instead of MDC + NDC) when detecting application is using NLog ver. 4.6. Make sure to update NLog.config to match this change. Make sure that all sub-components have upgraded to LibLog ver. 5.0.3 (or newer) if they make use of `OpenNestedContext` or `OpenMappedContext`.
 
 See also [NLog 4.6 Milestone](https://github.com/NLog/NLog/milestone/44?closed=1)
-
-Full changelog: https://github.com/NLog/NLog/blob/master/CHANGELOG.md
-
-Supported can be found on https://nlog-project.org/config/
-
 
 ### V4.5.11 (2018/11/06)
 
